@@ -1,12 +1,9 @@
-# Sticker image slots
+# User stickers
 
-The chat supports four image-backed sticker slots.
+The application does not ship with a fixed sticker pack.
 
-Put any of these files beside the executable under `assets/stickers/`:
+Users add their own PNG, JPG/JPEG or BMP images from the **STICKERS** menu. Imported stickers are copied to the user's local application-data folder and appear in the sticker dropdown.
 
-- `1.png`, `1.jpg` or `1.bmp`
-- `2.png`, `2.jpg` or `2.bmp`
-- `3.png`, `3.jpg` or `3.bmp`
-- `4.png`, `4.jpg` or `4.bmp`
+When a sticker is sent, the image bytes are fragmented and transmitted through the chat protocol, then reconstructed and cached by the receiver. The receiver does not need to already have the same sticker file.
 
-The sender transmits the sticker ID, not the bitmap bytes, so every client should ship with the same sticker pack. If an image is missing, the app renders a built-in pixel sticker instead.
+Current per-sticker transfer limit: 512 KB.
