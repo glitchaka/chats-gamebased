@@ -1,9 +1,7 @@
-// This file intentionally uses the exact glyph sheet already generated from the supplied high-resolution font image.
-// The sheet is an ASCII grid: columns 0..15, rows 0..3, characters 32 (' ') through 95 ('_').
-
 int sourceGlyphIndex(wchar_t ch) {
     if (ch >= L'a' && ch <= L'z') ch = static_cast<wchar_t>(ch - L'a' + L'A');
-    if (ch >= L' ' && ch <= L'_') return static_cast<int>(ch - L' ');
+    if (ch >= L'A' && ch <= L'Z') return static_cast<int>(ch - L'A');
+    if (ch >= L'0' && ch <= L'9') return 26 + static_cast<int>(ch - L'0');
     return -1;
 }
 
@@ -29,13 +27,8 @@ std::wstring fitPixelText(std::wstring text, int maxWidth, int height) {
     return text + L"...";
 }
 
-void drawPixelMark(HDC dc, wchar_t, int x, int y, int height, COLORREF color) {
-    const int width = std::max(4, height / 2 + 2);
-    const int unit = std::max(1, height / 8);
-    RECT r{x + unit, y + height / 2, x + width - unit, y + height / 2 + unit};
-    HBRUSH brush = CreateSolidBrush(color);
-    FillRect(dc, &r, brush);
-    DeleteObject(brush);
+void drawPixelMark(HDC dc, wchar_t ch, int x, int y, int height, COLORREF color) {
+    drawPixelMarkLegacy(dc, ch, x, y, height, color);
 }
 
 void drawPixelText(App& app, HDC dc, const std::wstring& source, int x, int y, int height, COLORREF color) {
@@ -65,8 +58,8 @@ void drawPixelText(App& app, HDC dc, const std::wstring& source, int x, int y, i
 
         const int index = sourceGlyphIndex(ch);
         if (index >= 0 && app.pixelFont && app.pixelFont->GetLastStatus() == Gdiplus::Ok) {
-            const int col = index % 16;
-            const int row = index / 16;
+            const int col = index % 10;
+            const int row = index / 10;
             const Gdiplus::Rect dest(cursor, y, height, height);
             graphics.DrawImage(app.pixelFont.get(), dest,
                                col * kFontCellWidth,
