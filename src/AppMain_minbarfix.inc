@@ -63,17 +63,13 @@ LRESULT CALLBACK unreadProcFixed(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
             const int unread = std::clamp(app->unreadCount, 0, kUnreadMax);
             const int fillWidth = ((kMinBarFillRight - kMinBarFillLeft) * unread) / kUnreadMax;
             if (fillWidth > 0) {
-                const Gdiplus::Region oldClip = [&g]() {
-                    Gdiplus::Region region;
-                    g.GetClip(&region);
-                    return region;
-                }();
+                const Gdiplus::GraphicsState state = g.Save();
                 Gdiplus::Rect clipRect(kMinBarFillLeft, kMinBarFillTop,
                                        fillWidth,
                                        kMinBarFillBottom - kMinBarFillTop);
                 g.SetClip(clipRect, Gdiplus::CombineModeReplace);
                 g.DrawImage(app->unreadBar.get(), 0, 0);
-                g.SetClip(&oldClip, Gdiplus::CombineModeReplace);
+                g.Restore(state);
             }
         }
 
