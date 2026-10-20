@@ -1,5 +1,6 @@
-    app.stickerButtonRect = {640,522,774,570};
-    app.sendRect = {786,522,892,570};
+    app.stickerButtonRect = {640,522,742,570};
+    app.audioButtonRect = {750,522,818,570};
+    app.sendRect = {826,522,892,570};
     if (app.edit) SetWindowPos(app.edit,nullptr,40,531,584,29,SWP_NOZORDER|SWP_NOACTIVATE);
     if (app.friendEdit) SetWindowPos(app.friendEdit,nullptr,638,194,160,24,SWP_NOZORDER|SWP_NOACTIVATE);
     if (app.groupEdit) SetWindowPos(app.groupEdit,nullptr,638,390,160,24,SWP_NOZORDER|SWP_NOACTIVATE);
@@ -26,7 +27,7 @@ void paintStickerPopup(App& app, HDC dc) {
         drawImageFit(dc,app.stickers[i].image.get(),RECT{r.left+4,r.top+4,r.right-4,r.bottom-4});
         app.stickerMenuRects.push_back(r);
     }
-    if (app.stickers.empty()) drawPixelText(app,dc,L"CHOOSE ADD TO SEND",326,382,12,t.muted);
+    if (app.stickers.empty()) drawPixelText(app,dc,L"CHOOSE ADD TO LOAD",326,382,12,t.muted);
 }
 
 void paint(App& app, HDC target) {
@@ -93,6 +94,7 @@ void paint(App& app, HDC target) {
         drawPixelText(app,dc,label,app.groupRows[i].left+8,app.groupRows[i].top+4,10,selected?t.bg:t.text);
     }
 
+    app.audioHitRects.clear();
     HRGN clip = CreateRectRgn(messages.left+12,messages.top+16,messages.right-12,messages.bottom-12);
     SelectClipRgn(dc,clip);
     int y = messages.top+22;
@@ -104,12 +106,19 @@ void paint(App& app, HDC target) {
         if (line.kind==ChatLine::Kind::Text) {
             drawPixelText(app,dc,fitPixelText(line.text,390,11),messages.left+155,y+2,11,t.text);
             y += 27;
-        } else {
+        } else if (line.kind==ChatLine::Kind::Sticker) {
             auto img = std::make_unique<Gdiplus::Bitmap>(line.stickerPath.c_str(),FALSE);
             RECT sr{messages.left+155,y-3,messages.left+235,y+71};
             drawChamferedBox(dc,sr,t.panel2,t.accent,6);
             if (img->GetLastStatus()==Gdiplus::Ok) drawImageFit(dc,img.get(),RECT{sr.left+4,sr.top+4,sr.right-4,sr.bottom-4});
             y += 80;
+        } else {
+            RECT ar{messages.left+155,y-2,messages.left+470,y+30};
+            drawChamferedBox(dc,ar,t.panel2,t.accentBright,6);
+            drawPixelText(app,dc,L"> AUDIO",ar.left+10,ar.top+8,11,t.accentBright);
+            drawPixelText(app,dc,fitPixelText(line.stickerPath.filename().wstring(),220,10),ar.left+82,ar.top+9,10,t.text);
+            app.audioHitRects.emplace_back(ar,line.stickerPath);
+            y += 40;
         }
     }
     SelectClipRgn(dc,nullptr); DeleteObject(clip);
@@ -120,9 +129,11 @@ void paint(App& app, HDC target) {
     drawChamferedBox(dc,tab,t.accent,t.accentBright,6);
     drawPixelCentered(app,dc,fitPixelText(targetLabel(app),180,11),tab,11,t.bg);
     drawChamferedBox(dc,app.stickerButtonRect,t.panel2,t.accentBright,8);
-    drawPixelCentered(app,dc,L"STICKERS",app.stickerButtonRect,12,t.text);
+    drawPixelCentered(app,dc,L"STICKERS",app.stickerButtonRect,10,t.text);
+    drawChamferedBox(dc,app.audioButtonRect,t.panel2,t.accentBright,8);
+    drawPixelCentered(app,dc,L"AUDIO",app.audioButtonRect,10,t.text);
     drawChamferedBox(dc,app.sendRect,t.panel2,t.accentBright,8);
-    drawPixelCentered(app,dc,L"SEND",app.sendRect,12,t.text);
+    drawPixelCentered(app,dc,L"SEND",app.sendRect,10,t.text);
     drawPixelText(app,dc,fitPixelText(app.status,820,10),24,591,10,t.muted);
 
     paintStickerPopup(app,dc);
