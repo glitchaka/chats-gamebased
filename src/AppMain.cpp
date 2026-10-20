@@ -27,8 +27,11 @@
 #undef importSticker
 #include "AppMain_stickerfix.inc"
 #include "AppMain_iconfix.inc"
+#include "AppMain_closebarfix.inc"
 
+#define updateUnreadHud updateUnreadHudOnClose
 #define wWinMain wWinMainLegacy
 #include "AppMain_part04.inc"
 #undef wWinMain
+#undef updateUnreadHud
 #include "AppMain_entryfix.inc"
