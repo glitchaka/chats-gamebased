@@ -101,8 +101,8 @@ void drawPixelText(App&, HDC dc, const std::wstring& source, int x, int y, int h
 void drawPixelCentered(App& app, HDC dc, const std::wstring& text, const RECT& r, int height, COLORREF color) {
     const int w = pixelTextWidth(text,height);
     const int actualHeight = pixelfont::kGlyphHeight * std::max(1,(height+pixelfont::kGlyphHeight-1)/pixelfont::kGlyphHeight);
-    const int x = r.left + std::max(0,((r.right-r.left)-w)/2);
-    const int y = r.top + std::max(0,((r.bottom-r.top)-actualHeight)/2);
+    const int x = static_cast<int>(r.left) + std::max(0,(static_cast<int>(r.right-r.left)-w)/2);
+    const int y = static_cast<int>(r.top) + std::max(0,(static_cast<int>(r.bottom-r.top)-actualHeight)/2);
     drawPixelText(app,dc,text,x,y,height,color);
 }
 
