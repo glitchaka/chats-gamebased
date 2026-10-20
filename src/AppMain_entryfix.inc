@@ -44,8 +44,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 1;
     }
 
-    app.unreadHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kUnreadClass, L"",
-                                     WS_POPUP, 0, 0, kMinBarWidth, kMinBarHeight, hwnd, nullptr, instance, &app);
+    app.unreadHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_LAYERED,
+                                     kUnreadClass, L"", WS_POPUP,
+                                     0, 0, kMinBarWidth, kMinBarHeight,
+                                     hwnd, nullptr, instance, &app);
+    if (app.unreadHwnd) {
+        SetLayeredWindowAttributes(app.unreadHwnd, kMinBarTransparent, 0, LWA_COLORKEY);
+    }
 
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
