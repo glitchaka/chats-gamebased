@@ -10,6 +10,18 @@ bool sendStickerToTarget(App& app, const std::filesystem::path& path, const std:
     return app.net.sendStickerFile(filename, bytes);
 }
 
+bool sendAudioToTarget(App& app, const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes) {
+    const std::string filename = wideToUtf8(path.filename().wstring());
+    if (app.targetMode == TargetMode::Friend && app.selectedFriend >= 0 && app.selectedFriend < static_cast<int>(app.friends.size())) {
+        return app.audioNet.sendTo(app.friends[static_cast<std::size_t>(app.selectedFriend)].endpoint, {}, filename, bytes);
+    }
+    if (app.targetMode == TargetMode::Group && app.selectedGroup >= 0 && app.selectedGroup < static_cast<int>(app.groups.size())) {
+        const auto& g = app.groups[static_cast<std::size_t>(app.selectedGroup)];
+        return app.audioNet.sendMany(g.members, g.name, filename, bytes);
+    }
+    return app.audioNet.sendMany(allFriendEndpoints(app), {}, filename, bytes);
+}
+
 std::filesystem::path saveReceivedSticker(const chatnet::Event& event) {
     if (event.stickerData.empty()) return {};
     std::error_code ec;
@@ -21,6 +33,20 @@ std::filesystem::path saveReceivedSticker(const chatnet::Event& event) {
     std::ofstream file(path, std::ios::binary);
     if (!file) return {};
     file.write(reinterpret_cast<const char*>(event.stickerData.data()), static_cast<std::streamsize>(event.stickerData.size()));
+    return file ? path : std::filesystem::path{};
+}
+
+std::filesystem::path saveReceivedAudio(const audionet::Event& event) {
+    if (event.data.empty()) return {};
+    std::error_code ec;
+    std::filesystem::create_directories(receivedAudioDirectory(), ec);
+    std::filesystem::path name = utf8ToWide(event.filename);
+    if (!isAudioExtension(name)) name = L"audio.bin";
+    const auto stamp = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const auto path = receivedAudioDirectory() / (std::to_wstring(stamp) + L"_" + name.filename().wstring());
+    std::ofstream file(path, std::ios::binary);
+    if (!file) return {};
+    file.write(reinterpret_cast<const char*>(event.data.data()), static_cast<std::streamsize>(event.data.size()));
     return file ? path : std::filesystem::path{};
 }
 
@@ -78,6 +104,20 @@ void updateNetwork(App& app) {
             changed = true;
         }
     }
+
+    for (const auto& event : app.audioNet.update()) {
+        if (!event.endpoint.empty()) ensureFriend(app, event.endpoint, event.name);
+        if (!event.channel.empty()) ensureIncomingGroup(app, event.channel, event.endpoint);
+        const auto path = saveReceivedAudio(event);
+        if (!path.empty()) {
+            app.lines.push_back(ChatLine{ChatLine::Kind::Audio, utf8ToWide(event.name), utf8ToWide(event.filename), utf8ToWide(event.channel), path, false});
+            trimHistory(app);
+            app.sounds.play(sfx::Cue::Incoming);
+            noteIncoming(app);
+            changed = true;
+        }
+    }
+
     if (changed) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
@@ -95,6 +135,41 @@ void sendCurrentMessage(App& app) {
         app.status = L"SEND FAILED";
         InvalidateRect(app.hwnd, nullptr, FALSE);
     }
+}
+
+void sendAudioFromPicker(App& app) {
+    wchar_t file[MAX_PATH]{};
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = app.hwnd;
+    ofn.lpstrFilter = L"Audio\0*.mp3;*.wav;*.ogg;*.m4a;*.aac;*.flac;*.wma\0MP3\0*.mp3\0WAV\0*.wav\0All files\0*.*\0\0";
+    ofn.lpstrFile = file;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    if (!GetOpenFileNameW(&ofn)) return;
+
+    const std::filesystem::path source(file);
+    if (!isAudioExtension(source)) {
+        app.status = L"INVALID AUDIO";
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+        return;
+    }
+    const auto bytes = readBytes(source);
+    if (bytes.empty()) {
+        app.status = L"AUDIO INVALID OR OVER 16 MB";
+        InvalidateRect(app.hwnd, nullptr, FALSE);
+        return;
+    }
+
+    if (sendAudioToTarget(app, source, bytes)) {
+        app.lines.push_back(ChatLine{ChatLine::Kind::Audio, L"ME", source.filename().wstring(), {}, source, true});
+        trimHistory(app);
+        app.status = L"AUDIO SENT";
+        app.sounds.play(sfx::Cue::Click);
+    } else {
+        app.status = L"AUDIO SEND FAILED";
+    }
+    InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 void addFriendFromEdit(App& app) {
