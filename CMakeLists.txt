@@ -14,7 +14,7 @@ add_executable(chats-gamebased WIN32
 
 target_include_directories(chats-gamebased PRIVATE src)
 target_compile_definitions(chats-gamebased PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi winmm gdiplus ole32 shell32)
+target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi winmm gdiplus ole32 shell32 comdlg32)
 
 if(MSVC)
     target_compile_options(chats-gamebased PRIVATE /W4 /permissive- /utf-8)
@@ -26,9 +26,5 @@ set_target_properties(chats-gamebased PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
 )
 
-# Portable distribution layout:
-# dist/chats-gamebased/
-#   chats-gamebased.exe
-#   assets/...
 install(TARGETS chats-gamebased RUNTIME DESTINATION ".")
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/" DESTINATION "assets")
