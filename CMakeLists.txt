@@ -9,19 +9,17 @@ add_executable(chats-gamebased WIN32
     src/main.cpp
     src/ChatNet.cpp
     src/SoundFx.cpp
+    src/app.rc
 )
 
 target_include_directories(chats-gamebased PRIVATE src)
 target_compile_definitions(chats-gamebased PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi winmm gdiplus ole32)
+target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi winmm gdiplus ole32 shell32)
 
 if(MSVC)
     target_compile_options(chats-gamebased PRIVATE /W4 /permissive- /utf-8)
-    set_source_files_properties(src/main.cpp PROPERTIES COMPILE_OPTIONS "/FIobjidl.h")
     set_property(TARGET chats-gamebased PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-elseif(MINGW)
-    set_source_files_properties(src/main.cpp PROPERTIES COMPILE_OPTIONS "-include;objidl.h")
 endif()
 
 set_target_properties(chats-gamebased PROPERTIES
