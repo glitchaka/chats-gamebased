@@ -1,9 +1,7 @@
 #include "ChatNet.h"
 #include "SoundFx.h"
 #include "resource.h"
-#include "PixelFontData.h"
 
-#define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h>
 #include <shellapi.h>
@@ -96,6 +94,7 @@ struct App {
     std::vector<StickerItem> stickers;
 
     std::unique_ptr<Gdiplus::Bitmap> unreadBar;
+    std::unique_ptr<Gdiplus::Bitmap> pixelFont;
 
     TargetMode targetMode{TargetMode::All};
     int selectedFriend{-1};
