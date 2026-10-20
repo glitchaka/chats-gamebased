@@ -1,4 +1,10 @@
+#define kUnreadWidth kUnreadWidthLegacy
+#define kUnreadHeight kUnreadHeightLegacy
 #include "AppMain_part00.inc"
+#undef kUnreadHeight
+#undef kUnreadWidth
+constexpr int kUnreadWidth = 360;
+constexpr int kUnreadHeight = 36;
 
 #define sourceGlyphIndex sourceGlyphIndexLegacy
 #define glyphAdvanceFor glyphAdvanceForLegacy
@@ -22,16 +28,21 @@
 #define importSticker importStickerLibraryOnly
 #include "AppMain_part02.inc"
 #define addTrayIcon addTrayIconLegacy
+#define unreadProc unreadProcLegacy
 #include "AppMain_part03.inc"
+#undef unreadProc
 #undef addTrayIcon
 #undef importSticker
 #include "AppMain_stickerfix.inc"
 #include "AppMain_iconfix.inc"
-#include "AppMain_closebarfix.inc"
+#include "AppMain_minbarfix.inc"
 
-#define updateUnreadHud updateUnreadHudOnClose
+#define updateUnreadHud showCompactTrayBar
 #define wWinMain wWinMainLegacy
 #include "AppMain_part04.inc"
 #undef wWinMain
 #undef updateUnreadHud
+
+#define unreadProc unreadProcFixed
 #include "AppMain_entryfix.inc"
+#undef unreadProc
