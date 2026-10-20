@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - 'src/**'
+      - 'assets/**'
       - 'CMakeLists.txt'
       - 'build.cmd'
       - '.github/workflows/build.yml'
@@ -16,13 +17,23 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure
         run: cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+
       - name: Build
         run: cmake --build build --config Release --parallel
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "build/bin/Release/chats-gamebased.exe" "dist/chats-gamebased.exe"
+          Copy-Item "assets" "dist/assets" -Recurse
+
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
           name: chats-gamebased-windows-x64
-          path: build/bin/Release/chats-gamebased.exe
+          path: dist/**
           if-no-files-found: error
