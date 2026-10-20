@@ -85,10 +85,17 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         if (PtInRect(&app->addGroupRect,pt)) { addGroupFromEdit(*app); return 0; }
         if (PtInRect(&app->allRect,pt)) { app->targetMode=TargetMode::All; app->selectedFriend=app->selectedGroup=-1; InvalidateRect(hwnd,nullptr,FALSE); return 0; }
         if (PtInRect(&app->sendRect,pt)) { sendCurrentMessage(*app); SetFocus(app->edit); return 0; }
+        if (PtInRect(&app->audioButtonRect,pt)) { sendAudioFromPicker(*app); return 0; }
         if (PtInRect(&app->stickerButtonRect,pt)) { app->stickerMenuOpen=!app->stickerMenuOpen; InvalidateRect(hwnd,nullptr,FALSE); return 0; }
         if (app->stickerMenuOpen && PtInRect(&app->stickerImportRect,pt)) { importSticker(*app); return 0; }
         if (app->stickerMenuOpen) {
             for (std::size_t i=0;i<app->stickerMenuRects.size();++i) if (PtInRect(&app->stickerMenuRects[i],pt)) { sendUserSticker(*app,i); return 0; }
+        }
+        for (const auto& audio : app->audioHitRects) {
+            if (PtInRect(&audio.first,pt)) {
+                ShellExecuteW(hwnd,L"open",audio.second.c_str(),nullptr,nullptr,SW_SHOWNORMAL);
+                return 0;
+            }
         }
         for (int i=0;i<7 && i<static_cast<int>(app->friends.size());++i) if (PtInRect(&app->friendRows[i],pt)) {
             app->targetMode=TargetMode::Friend; app->selectedFriend=i; app->selectedGroup=-1; InvalidateRect(hwnd,nullptr,FALSE); return 0;
@@ -113,6 +120,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     case WM_DESTROY:
         KillTimer(hwnd,kNetworkTimer);
         removeTrayIcon(*app);
+        app->audioNet.stop();
         app->net.stop();
         if (app->edit) RemovePropW(app->edit,L"GameChatApp");
         if (app->editBrush) DeleteObject(app->editBrush);
