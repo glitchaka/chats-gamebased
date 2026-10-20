@@ -1,5 +1,6 @@
-constexpr int kMinBarWidth = 490;
-constexpr int kMinBarHeight = 55;
+constexpr int kMinBarWidth = 150;
+constexpr int kMinBarHeight = 50;
+constexpr COLORREF kMinBarTransparent = RGB(1, 2, 3);
 
 void showCompactTrayBar(App& app) {
     if (!app.unreadHwnd) return;
@@ -11,16 +12,6 @@ void showCompactTrayBar(App& app) {
                  work.top + 18,
                  kMinBarWidth, kMinBarHeight,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
-
-    POINT shape[5] = {
-        {0, 0},
-        {kMinBarWidth - 1, 0},
-        {kMinBarWidth - 1, kMinBarHeight - 10},
-        {kMinBarWidth - 11, kMinBarHeight - 1},
-        {0, kMinBarHeight - 1}
-    };
-    HRGN region = CreatePolygonRgn(shape, 5, WINDING);
-    if (region) SetWindowRgn(app.unreadHwnd, region, TRUE);
     InvalidateRect(app.unreadHwnd, nullptr, TRUE);
 }
 
@@ -43,28 +34,17 @@ LRESULT CALLBACK unreadProcFixed(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         HDC dc = BeginPaint(hwnd, &ps);
         RECT r{};
         GetClientRect(hwnd, &r);
-        const Theme& t = theme(*app);
-        fillSolid(dc, r, t.panel2);
 
+        // The minimized control is exactly the supplied toolkit bar. Paint a
+        // chroma-key background only so the pixels outside its contour vanish.
+        fillSolid(dc, r, kMinBarTransparent);
         if (app->unreadBar && app->unreadBar->GetLastStatus() == Gdiplus::Ok) {
             Gdiplus::Graphics g(dc);
             g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
             g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
-            const INT w = static_cast<INT>(app->unreadBar->GetWidth());
-            const INT h = static_cast<INT>(app->unreadBar->GetHeight());
-            g.DrawImage(app->unreadBar.get(), 0, 0, w, h);
-        } else {
-            HPEN pen = CreatePen(PS_SOLID, 1, t.accentBright);
-            HGDIOBJ oldPen = SelectObject(dc, pen);
-            HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
-            POINT outline[6] = {
-                {0,0}, {r.right-1,0}, {r.right-1,r.bottom-10},
-                {r.right-11,r.bottom-1}, {0,r.bottom-1}, {0,0}
-            };
-            Polyline(dc, outline, 6);
-            SelectObject(dc, oldBrush);
-            SelectObject(dc, oldPen);
-            DeleteObject(pen);
+            g.SetCompositingMode(Gdiplus::CompositingModeSourceOver);
+            // Native 1:1 copy. Never stretch the cropped toolkit asset.
+            g.DrawImage(app->unreadBar.get(), 0, 0);
         }
 
         EndPaint(hwnd, &ps);
