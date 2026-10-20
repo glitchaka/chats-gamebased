@@ -8,7 +8,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     App app;
     app.instance = instance;
     loadUiAssets(app);
-    loadUserStickers(app);
+    // Stickers are send-on-select. Do not preload the old persistent sticker
+    // directory, otherwise a previously chosen image appears "stuck" forever.
     if (!app.net.start(defaultPlayerName(), 34197)) {
         MessageBoxW(nullptr, utf8ToWide(app.net.lastError()).c_str(), L"Game Chat - network error", MB_ICONERROR | MB_OK);
     }
