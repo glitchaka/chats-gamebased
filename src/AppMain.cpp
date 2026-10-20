@@ -21,12 +21,11 @@
 
 #define importSticker importStickerLibraryOnly
 #include "AppMain_part02.inc"
-#undef importSticker
-#include "AppMain_stickerfix.inc"
-
 #define addTrayIcon addTrayIconLegacy
 #include "AppMain_part03.inc"
 #undef addTrayIcon
+#undef importSticker
+#include "AppMain_stickerfix.inc"
 #include "AppMain_iconfix.inc"
 
 #define wWinMain wWinMainLegacy
