@@ -2,10 +2,10 @@
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <windowsx.h>
 #include <dwmapi.h>
 
 #include <algorithm>
-#include <chrono>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -73,7 +73,7 @@ std::string wideToUtf8(const std::wstring& input)
 std::string defaultPlayerName()
 {
     wchar_t computer[64]{};
-    DWORD len = static_cast<DWORD>(std::size(computer));
+    DWORD len = 64;
     if (!GetComputerNameW(computer, &len) || len == 0) return "PLAYER";
     std::wstring name(computer, computer + len);
     std::string utf8 = wideToUtf8(name);
@@ -135,15 +135,16 @@ void sendCurrentMessage(App& app)
     const int len = GetWindowTextLengthW(app.edit);
     if (len <= 0) return;
 
-    std::wstring text(static_cast<std::size_t>(len), L'\0');
-    GetWindowTextW(app.edit, text.data(), len + 1);
+    std::wstring text(static_cast<std::size_t>(len + 1), L'\0');
+    const int copied = GetWindowTextW(app.edit, text.data(), len + 1);
+    if (copied <= 0) return;
+    text.resize(static_cast<std::size_t>(copied));
+
     while (!text.empty() && (text.back() == L'\r' || text.back() == L'\n' || text.back() == L' ')) text.pop_back();
     if (text.empty()) return;
 
     const std::string utf8 = wideToUtf8(text);
-    if (!app.net.sendChat(utf8)) {
-        app.status = L"NETWORK SEND FAILED";
-    }
+    if (!app.net.sendChat(utf8)) app.status = L"NETWORK SEND FAILED";
 
     app.lines.push_back(ChatLine{utf8ToWide(app.net.localName()), text, true});
     trimHistory(app);
@@ -153,19 +154,27 @@ void sendCurrentMessage(App& app)
 
 void updateNetwork(App& app)
 {
+    bool changed = false;
     for (const auto& event : app.net.update()) {
         if (event.type == chatnet::EventType::Message) {
             app.lines.push_back(ChatLine{utf8ToWide(event.name), utf8ToWide(event.text), false});
             trimHistory(app);
+            changed = true;
+        } else {
+            changed = true;
         }
     }
 
     const auto peers = app.net.peers();
-    app.status = app.net.isRunning()
+    const std::wstring status = app.net.isRunning()
         ? (L"LAN  •  PORT " + std::to_wstring(app.net.port()) + L"  •  " + std::to_wstring(peers.size()) + L" ONLINE")
         : L"NETWORK OFFLINE";
+    if (status != app.status) {
+        app.status = status;
+        changed = true;
+    }
 
-    InvalidateRect(app.hwnd, nullptr, FALSE);
+    if (changed) InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
 LRESULT CALLBACK editSubclass(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
@@ -258,8 +267,13 @@ void paint(App& app, HDC target)
     int py = peersRect.top + 20;
     for (std::size_t i = 0; i < peers.size() && i < 11; ++i) {
         HBRUSH dot = CreateSolidBrush(kGreen);
+        HGDIOBJ oldDotBrush = SelectObject(dc, dot);
+        HGDIOBJ oldDotPen = SelectObject(dc, GetStockObject(NULL_PEN));
         Ellipse(dc, peersRect.left + 16, py + 6, peersRect.left + 24, py + 14);
+        SelectObject(dc, oldDotPen);
+        SelectObject(dc, oldDotBrush);
         DeleteObject(dot);
+
         RECT peerName{peersRect.left + 30, py, peersRect.right - 12, py + 22};
         drawText(dc, utf8ToWide(peers[i].name), peerName, app.smallFont, kText,
                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
@@ -424,7 +438,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int)
     HRGN region = CreateRoundRectRgn(0, 0, kWindowWidth + 1, kWindowHeight + 1, 24, 24);
     SetWindowRgn(hwnd, region, TRUE);
 
-    const DWORD cornerPreference = 2; // DWMWCP_ROUND
+    const DWORD cornerPreference = 2;
     DwmSetWindowAttribute(hwnd, 33, &cornerPreference, sizeof(cornerPreference));
 
     ShowWindow(hwnd, SW_SHOW);
