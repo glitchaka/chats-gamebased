@@ -24,13 +24,25 @@
 
 #define importSticker importStickerLibraryOnly
 #define sendUserSticker sendUserStickerLegacy
+#define sendAudioToTarget sendAudioToTargetLegacy
+#define sendAudioFromPicker sendAudioFromPickerLegacy
+#define updateNetwork updateNetworkLegacy
 #include "AppMain_part02.inc"
+#undef updateNetwork
+#undef sendAudioFromPicker
+#undef sendAudioToTarget
 #undef sendUserSticker
 #define unreadProc unreadProcLegacy
 #include "AppMain_part03.inc"
 #undef unreadProc
 #undef importSticker
+
+#define importSticker importStickerPrevious
+#define sendUserSticker sendUserStickerPrevious
 #include "AppMain_stickerfix.inc"
+#undef sendUserSticker
+#undef importSticker
+#include "AppMain_attachmentfix.inc"
 #include "AppMain_minbarfix.inc"
 
 #define updateUnreadHud showCompactTrayBar
