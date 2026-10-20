@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_executable(chats-gamebased WIN32
-    src/main.cpp
+    src/AppMain.cpp
     src/ChatNet.cpp
     src/SoundFx.cpp
     src/app.rc
