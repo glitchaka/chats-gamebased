@@ -1,24 +1,25 @@
+constexpr int kMinBarWidth = 490;
+constexpr int kMinBarHeight = 55;
+
 void showCompactTrayBar(App& app) {
     if (!app.unreadHwnd) return;
 
     RECT work{};
     SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
     SetWindowPos(app.unreadHwnd, HWND_TOPMOST,
-                 work.right - kUnreadWidth - 18,
+                 work.right - kMinBarWidth - 18,
                  work.top + 18,
-                 kUnreadWidth, kUnreadHeight,
+                 kMinBarWidth, kMinBarHeight,
                  SWP_NOACTIVATE | SWP_SHOWWINDOW);
 
-    // Match the actual toolkit bar silhouette instead of showing a rectangular
-    // black helper window around it.
-    POINT shape[] = {
+    POINT shape[5] = {
         {0, 0},
-        {kUnreadWidth - 1, 0},
-        {kUnreadWidth - 1, kUnreadHeight - 10},
-        {kUnreadWidth - 11, kUnreadHeight - 1},
-        {0, kUnreadHeight - 1}
+        {kMinBarWidth - 1, 0},
+        {kMinBarWidth - 1, kMinBarHeight - 10},
+        {kMinBarWidth - 11, kMinBarHeight - 1},
+        {0, kMinBarHeight - 1}
     };
-    HRGN region = CreatePolygonRgn(shape, static_cast<int>(std::size(shape)), WINDING);
+    HRGN region = CreatePolygonRgn(shape, 5, WINDING);
     if (region) SetWindowRgn(app.unreadHwnd, region, TRUE);
     InvalidateRect(app.unreadHwnd, nullptr, TRUE);
 }
@@ -43,31 +44,24 @@ LRESULT CALLBACK unreadProcFixed(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         RECT r{};
         GetClientRect(hwnd, &r);
         const Theme& t = theme(*app);
-
-        // One bar only. No title, no counter text, no second HUD layered on top.
         fillSolid(dc, r, t.panel2);
-
-        const int unread = std::min(app->unreadCount, kUnreadMax);
-        if (unread > 0) {
-            const int innerWidth = std::max(0, r.right - 10);
-            RECT fill{2, 2, 2 + (innerWidth * unread) / kUnreadMax, r.bottom - 2};
-            fillSolid(dc, fill, t.accent);
-        }
 
         if (app->unreadBar && app->unreadBar->GetLastStatus() == Gdiplus::Ok) {
             Gdiplus::Graphics g(dc);
             g.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
-            g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
-            g.DrawImage(app->unreadBar.get(), Gdiplus::Rect(0, 0, r.right, r.bottom));
+            g.SetPixelOffsetMode(Gdiplus::PixelOffsetModeNone);
+            const INT w = static_cast<INT>(app->unreadBar->GetWidth());
+            const INT h = static_cast<INT>(app->unreadBar->GetHeight());
+            g.DrawImage(app->unreadBar.get(), 0, 0, w, h);
         } else {
-            HPEN pen = CreatePen(PS_SOLID, 2, t.accentBright);
+            HPEN pen = CreatePen(PS_SOLID, 1, t.accentBright);
             HGDIOBJ oldPen = SelectObject(dc, pen);
             HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(HOLLOW_BRUSH));
-            POINT outline[] = {
+            POINT outline[6] = {
                 {0,0}, {r.right-1,0}, {r.right-1,r.bottom-10},
                 {r.right-11,r.bottom-1}, {0,r.bottom-1}, {0,0}
             };
-            Polyline(dc, outline, static_cast<int>(std::size(outline)));
+            Polyline(dc, outline, 6);
             SelectObject(dc, oldBrush);
             SelectObject(dc, oldPen);
             DeleteObject(pen);
