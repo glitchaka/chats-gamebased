@@ -7,6 +7,7 @@
 void loadUiAssets(App& app) {
     const auto ui = executableDirectory() / L"assets" / L"ui";
     loadBitmap(app.unreadBar, ui / L"unread_bar.png");
+    loadBitmap(app.pixelFont, ui / L"pixel_font.png");
 }
 
 void loadUserStickers(App& app) {
@@ -59,15 +60,31 @@ void drawChamferedBox(HDC dc, const RECT& rect, COLORREF fill, COLORREF border, 
     DeleteObject(brush);
 }
 
+constexpr int kFontCellWidth = 48;
+constexpr int kFontCellHeight = 56;
+constexpr int kFontVisibleTop = 4;
+constexpr int kFontVisibleHeight = 48;
+
+int sourceGlyphIndex(wchar_t ch) {
+    if (ch >= L'a' && ch <= L'z') ch = static_cast<wchar_t>(ch - L'a' + L'A');
+    if (ch >= L'A' && ch <= L'Z') return static_cast<int>(ch - L'A');
+    if (ch >= L'0' && ch <= L'9') return 26 + static_cast<int>(ch - L'0');
+    return -1;
+}
+
+int glyphAdvanceFor(wchar_t ch, int height) {
+    if (ch == L' ') return std::max(4, height / 2);
+    if (sourceGlyphIndex(ch) >= 0) return std::max(6, height);
+    return std::max(4, height / 2 + 2);
+}
+
 int glyphAdvance(int height) {
-    const int scale = std::max(1, (height + pixelfont::kGlyphHeight - 1) / pixelfont::kGlyphHeight);
-    return (pixelfont::kGlyphWidth + 1) * scale;
+    return std::max(6, height);
 }
 
 int pixelTextWidth(const std::wstring& text, int height) {
-    const int adv = glyphAdvance(height);
     int width = 0;
-    for (wchar_t ch : text) width += (ch == L' ') ? std::max(3, adv/2) : adv;
+    for (wchar_t ch : text) width += glyphAdvanceFor(ch, height);
     return width;
 }
 
@@ -77,30 +94,98 @@ std::wstring fitPixelText(std::wstring text, int maxWidth, int height) {
     return text + L"...";
 }
 
-void drawPixelText(App&, HDC dc, const std::wstring& source, int x, int y, int height, COLORREF color) {
-    const int scale = std::max(1, (height + pixelfont::kGlyphHeight - 1) / pixelfont::kGlyphHeight);
-    const int adv = (pixelfont::kGlyphWidth + 1) * scale;
-    int cursor = x;
+void drawPixelMark(HDC dc, wchar_t ch, int x, int y, int height, COLORREF color) {
+    const int width = glyphAdvanceFor(ch, height);
+    const int unit = std::max(1, height / 8);
+    const int cx = x + width / 2;
     HBRUSH brush = CreateSolidBrush(color);
-    for (wchar_t ch : source) {
-        if (ch == L' ') { cursor += std::max(3, adv/2); continue; }
-        const auto& glyph = pixelfont::glyph(ch);
-        for (int row=0; row<pixelfont::kGlyphHeight; ++row) {
-            const std::uint8_t bits = glyph[static_cast<std::size_t>(row)];
-            for (int col=0; col<pixelfont::kGlyphWidth; ++col) {
-                if ((bits & (1u << (pixelfont::kGlyphWidth-1-col))) == 0) continue;
-                RECT px{cursor + col*scale, y + row*scale, cursor + (col+1)*scale, y + (row+1)*scale};
-                FillRect(dc,&px,brush);
-            }
-        }
-        cursor += adv;
+    auto block = [&](int left, int top, int right, int bottom) {
+        RECT r{left, top, right, bottom};
+        FillRect(dc, &r, brush);
+    };
+
+    switch (ch) {
+    case L'.': block(cx-unit, y+height-2*unit, cx+unit, y+height); break;
+    case L',': block(cx-unit, y+height-2*unit, cx+unit, y+height-unit); block(cx, y+height-unit, cx+unit, y+height); break;
+    case L':': block(cx-unit, y+2*unit, cx+unit, y+4*unit); block(cx-unit, y+height-3*unit, cx+unit, y+height-unit); break;
+    case L';': block(cx-unit, y+2*unit, cx+unit, y+4*unit); block(cx-unit, y+height-3*unit, cx+unit, y+height-2*unit); block(cx, y+height-2*unit, cx+unit, y+height-unit); break;
+    case L'-': block(x+unit, y+height/2-unit/2, x+width-unit, y+height/2+unit); break;
+    case L'_': block(x, y+height-unit, x+width, y+height); break;
+    case L'+': block(cx-unit/2, y+2*unit, cx+unit, y+height-2*unit); block(x+unit, y+height/2-unit/2, x+width-unit, y+height/2+unit); break;
+    case L'=': block(x+unit, y+3*unit, x+width-unit, y+4*unit); block(x+unit, y+height-3*unit, x+width-unit, y+height-2*unit); break;
+    case L'!': block(cx-unit/2, y+unit, cx+unit, y+height-3*unit); block(cx-unit/2, y+height-2*unit, cx+unit, y+height-unit); break;
+    case L'/':
+        for (int i=0; i<6; ++i) block(x+width-(i+2)*unit, y+(i+1)*unit, x+width-i*unit, y+(i+3)*unit);
+        break;
+    case L'\\':
+        for (int i=0; i<6; ++i) block(x+i*unit, y+(i+1)*unit, x+(i+2)*unit, y+(i+3)*unit);
+        break;
+    case L'(':
+        block(x+width-2*unit, y+unit, x+width-unit, y+height-unit);
+        block(x+width-3*unit, y+2*unit, x+width-2*unit, y+height-2*unit);
+        break;
+    case L')':
+        block(x+unit, y+unit, x+2*unit, y+height-unit);
+        block(x+2*unit, y+2*unit, x+3*unit, y+height-2*unit);
+        break;
+    case L'[': block(x+unit,y+unit,x+2*unit,y+height-unit); block(x+unit,y+unit,x+width-unit,y+2*unit); block(x+unit,y+height-2*unit,x+width-unit,y+height-unit); break;
+    case L']': block(x+width-2*unit,y+unit,x+width-unit,y+height-unit); block(x+unit,y+unit,x+width-unit,y+2*unit); block(x+unit,y+height-2*unit,x+width-unit,y+height-unit); break;
+    case L'"': block(x+unit,y+unit,x+2*unit,y+3*unit); block(x+width-2*unit,y+unit,x+width-unit,y+3*unit); break;
+    case L'\'': block(cx-unit/2,y+unit,cx+unit,y+3*unit); break;
+    case L'*': block(cx-unit/2,y+2*unit,cx+unit,y+height-2*unit); block(x+unit,y+height/2-unit/2,x+width-unit,y+height/2+unit); break;
+    case L'?': block(x+unit,y+unit,x+width-unit,y+2*unit); block(x+width-2*unit,y+2*unit,x+width-unit,y+4*unit); block(cx-unit/2,y+4*unit,cx+unit,y+height-3*unit); block(cx-unit/2,y+height-2*unit,cx+unit,y+height-unit); break;
+    default: block(x+unit, y+height/2-unit/2, x+width-unit, y+height/2+unit); break;
     }
     DeleteObject(brush);
 }
 
+void drawPixelText(App& app, HDC dc, const std::wstring& source, int x, int y, int height, COLORREF color) {
+    int cursor = x;
+    Gdiplus::Graphics graphics(dc);
+    graphics.SetInterpolationMode(Gdiplus::InterpolationModeNearestNeighbor);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf);
+
+    const float red = static_cast<float>(GetRValue(color)) / 255.0f;
+    const float green = static_cast<float>(GetGValue(color)) / 255.0f;
+    const float blue = static_cast<float>(GetBValue(color)) / 255.0f;
+    Gdiplus::ColorMatrix matrix = {{
+        {0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 0.0f, 0.0f},
+        {0.0f, 0.0f, 0.0f, 1.0f, 0.0f},
+        {red, green, blue, 0.0f, 1.0f}
+    }};
+    Gdiplus::ImageAttributes tint;
+    tint.SetColorMatrix(&matrix, Gdiplus::ColorMatrixFlagsDefault, Gdiplus::ColorAdjustTypeBitmap);
+
+    for (wchar_t ch : source) {
+        if (ch == L' ') {
+            cursor += glyphAdvanceFor(ch, height);
+            continue;
+        }
+
+        const int index = sourceGlyphIndex(ch);
+        if (index >= 0 && app.pixelFont && app.pixelFont->GetLastStatus() == Gdiplus::Ok) {
+            const int col = index % 10;
+            const int row = index / 10;
+            const Gdiplus::Rect dest(cursor, y, height, height);
+            graphics.DrawImage(app.pixelFont.get(), dest,
+                               col * kFontCellWidth,
+                               row * kFontCellHeight + kFontVisibleTop,
+                               kFontCellWidth,
+                               kFontVisibleHeight,
+                               Gdiplus::UnitPixel,
+                               &tint);
+        } else {
+            drawPixelMark(dc, ch, cursor, y, height, color);
+        }
+        cursor += glyphAdvanceFor(ch, height);
+    }
+}
+
 void drawPixelCentered(App& app, HDC dc, const std::wstring& text, const RECT& r, int height, COLORREF color) {
     const int w = pixelTextWidth(text,height);
-    const int actualHeight = pixelfont::kGlyphHeight * std::max(1,(height+pixelfont::kGlyphHeight-1)/pixelfont::kGlyphHeight);
+    const int actualHeight = height;
     const int x = static_cast<int>(r.left) + std::max(0,(static_cast<int>(r.right-r.left)-w)/2);
     const int y = static_cast<int>(r.top) + std::max(0,(static_cast<int>(r.bottom-r.top)-actualHeight)/2);
     drawPixelText(app,dc,text,x,y,height,color);
