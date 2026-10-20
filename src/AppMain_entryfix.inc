@@ -3,18 +3,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     Gdiplus::GdiplusStartupInput gdiplusInput;
     if (Gdiplus::GdiplusStartup(&gdiplusToken, &gdiplusInput, nullptr) != Gdiplus::Ok) return 1;
 
-    if (!gToolkitIcon) gToolkitIcon = createToolkitIcon();
-
     App app;
     app.instance = instance;
     loadUiAssets(app);
-    // Stickers are send-on-select. Do not preload the old persistent sticker
-    // directory, otherwise a previously chosen image appears "stuck" forever.
     if (!app.net.start(defaultPlayerName(), 34197)) {
         MessageBoxW(nullptr, utf8ToWide(app.net.lastError()).c_str(), L"Game Chat - network error", MB_ICONERROR | MB_OK);
     }
 
-    HICON icon = gToolkitIcon ? gToolkitIcon : LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
+    HICON icon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
+    if (!icon) icon = LoadIconW(instance, MAKEINTRESOURCEW(IDI_APP_ICON));
+
     WNDCLASSEXW wc{};
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = wndProc;
@@ -42,13 +40,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_APPWINDOW, kWindowClass, L"Game Chat", WS_POPUP,
                                 x, y, kWindowWidth, kWindowHeight, nullptr, nullptr, instance, &app);
     if (!hwnd) {
-        if (gToolkitIcon) { DestroyIcon(gToolkitIcon); gToolkitIcon = nullptr; }
         Gdiplus::GdiplusShutdown(gdiplusToken);
         return 1;
     }
 
     app.unreadHwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kUnreadClass, L"",
-                                     WS_POPUP, 0, 0, kUnreadWidth, kUnreadHeight, hwnd, nullptr, instance, &app);
+                                     WS_POPUP, 0, 0, kMinBarWidth, kMinBarHeight, hwnd, nullptr, instance, &app);
 
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd, 20, &dark, sizeof(dark));
@@ -62,7 +59,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     if (app.unreadHwnd && IsWindow(app.unreadHwnd)) DestroyWindow(app.unreadHwnd);
-    if (gToolkitIcon) { DestroyIcon(gToolkitIcon); gToolkitIcon = nullptr; }
     Gdiplus::GdiplusShutdown(gdiplusToken);
     return static_cast<int>(msg.wParam);
 }
