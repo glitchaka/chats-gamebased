@@ -11,6 +11,7 @@
 #include <random>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -18,28 +19,36 @@ namespace chatnet {
 namespace {
 
 constexpr std::uint32_t kMagic = 0x54484347; // GCHT
-constexpr std::uint8_t kVersion = 3;
+constexpr std::uint8_t kVersion = 4;
 constexpr std::uint8_t kHello = 1;
 constexpr std::uint8_t kChat = 2;
-constexpr std::uint8_t kSticker = 3;
+constexpr std::uint8_t kStickerChunk = 3;
 constexpr std::chrono::milliseconds kHelloInterval{1500};
 constexpr std::chrono::milliseconds kPeerTimeout{9000};
 constexpr std::chrono::seconds kStunRetry{5};
+constexpr std::chrono::seconds kTransferTimeout{20};
 constexpr std::uint32_t kStunCookie = 0x2112A442u;
 constexpr const char* kStunHost = "stun.cloudflare.com";
 constexpr std::uint16_t kStunPort = 3478;
+constexpr std::size_t kStickerChunkBytes = 900;
+constexpr std::size_t kMaxStickerBytes = 512u * 1024u;
 
 #pragma pack(push, 1)
 struct Packet {
     std::uint32_t magic{};
     std::uint8_t version{};
     std::uint8_t type{};
-    std::uint8_t stickerId{};
-    std::uint8_t reserved{};
+    std::uint16_t reserved{};
     std::uint32_t senderId{};
+    std::uint32_t transferId{};
+    std::uint16_t chunkIndex{};
+    std::uint16_t chunkCount{};
+    std::uint32_t totalSize{};
+    std::uint16_t payloadSize{};
     char name[32]{};
     char channel[32]{};
-    char text[384]{};
+    char filename[64]{};
+    std::uint8_t payload[kStickerChunkBytes]{};
 };
 #pragma pack(pop)
 
@@ -94,7 +103,6 @@ bool parseEndpoint(const std::string& endpoint,
 
     std::string host = endpoint;
     std::string portText = std::to_string(defaultPort);
-
     const std::size_t colon = endpoint.rfind(':');
     if (colon != std::string::npos && colon > 0 && colon + 1 < endpoint.size()) {
         host = endpoint.substr(0, colon);
@@ -188,6 +196,18 @@ void writeU32(unsigned char* bytes, std::uint32_t value)
     bytes[3] = static_cast<unsigned char>(value & 0xff);
 }
 
+std::string safeFilename(std::string name)
+{
+    if (name.empty()) return "sticker.png";
+    for (char& ch : name) {
+        const bool ok = (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+                        (ch >= '0' && ch <= '9') || ch == '.' || ch == '_' || ch == '-';
+        if (!ok) ch = '_';
+    }
+    if (name.size() > 63) name.resize(63);
+    return name;
+}
+
 } // namespace
 
 std::string Peer::endpoint() const
@@ -201,6 +221,20 @@ struct ChatNet::Impl {
         std::chrono::steady_clock::time_point lastSeen{};
     };
 
+    struct IncomingSticker {
+        std::uint32_t senderId{};
+        std::string senderName;
+        std::string endpoint;
+        std::string channel;
+        std::string filename;
+        std::uint16_t chunkCount{};
+        std::uint32_t totalSize{};
+        std::vector<std::uint8_t> data;
+        std::vector<std::uint8_t> received;
+        std::size_t receivedCount{};
+        std::chrono::steady_clock::time_point lastSeen{};
+    };
+
     SOCKET socket{INVALID_SOCKET};
     bool winsockStarted{false};
     std::uint16_t listenPort{0};
@@ -210,6 +244,7 @@ struct ChatNet::Impl {
     sockaddr_in broadcast{};
     std::unordered_map<std::uint32_t, PeerState> peerMap;
     std::vector<Target> targets;
+    std::unordered_map<std::uint64_t, IncomingSticker> incoming;
     std::chrono::steady_clock::time_point nextBroadcastHello{};
 
     sockaddr_in stunServer{};
@@ -235,28 +270,74 @@ struct ChatNet::Impl {
         return sent == static_cast<int>(size);
     }
 
-    bool sendPacketTo(const sockaddr_in& destination,
-                      std::uint8_t type,
-                      const std::string& text,
-                      std::uint8_t stickerId,
-                      const std::string& channel)
+    bool sendControl(const sockaddr_in& destination,
+                     std::uint8_t type,
+                     const std::string& text,
+                     const std::string& channel)
     {
         Packet packet{};
         packet.magic = kMagic;
         packet.version = kVersion;
         packet.type = type;
-        packet.stickerId = stickerId;
         packet.senderId = localId;
         std::strncpy(packet.name, name.c_str(), sizeof(packet.name) - 1);
         std::strncpy(packet.channel, channel.c_str(), sizeof(packet.channel) - 1);
-        std::strncpy(packet.text, text.c_str(), sizeof(packet.text) - 1);
-        return sendRaw(destination, &packet, sizeof(packet));
+        if (!text.empty()) {
+            const std::size_t count = std::min(text.size(), sizeof(packet.payload) - 1);
+            std::memcpy(packet.payload, text.data(), count);
+            packet.payloadSize = static_cast<std::uint16_t>(count);
+        }
+        const std::size_t bytes = offsetof(Packet, payload) + packet.payloadSize;
+        return sendRaw(destination, &packet, bytes);
+    }
+
+    bool sendSticker(const sockaddr_in& destination,
+                     const std::string& filename,
+                     const std::vector<std::uint8_t>& bytes,
+                     const std::string& channel)
+    {
+        if (bytes.empty() || bytes.size() > kMaxStickerBytes) {
+            error = "sticker image must be between 1 byte and 512 KB";
+            return false;
+        }
+
+        const std::uint32_t transferId = makeId();
+        const std::size_t countSize = (bytes.size() + kStickerChunkBytes - 1) / kStickerChunkBytes;
+        if (countSize == 0 || countSize > 65535) return false;
+        const std::uint16_t chunkCount = static_cast<std::uint16_t>(countSize);
+        const std::string cleanName = safeFilename(filename);
+
+        bool sentAny = false;
+        for (std::uint16_t index = 0; index < chunkCount; ++index) {
+            const std::size_t offset = static_cast<std::size_t>(index) * kStickerChunkBytes;
+            const std::size_t remaining = bytes.size() - offset;
+            const std::size_t payloadSize = std::min(remaining, kStickerChunkBytes);
+
+            Packet packet{};
+            packet.magic = kMagic;
+            packet.version = kVersion;
+            packet.type = kStickerChunk;
+            packet.senderId = localId;
+            packet.transferId = transferId;
+            packet.chunkIndex = index;
+            packet.chunkCount = chunkCount;
+            packet.totalSize = static_cast<std::uint32_t>(bytes.size());
+            packet.payloadSize = static_cast<std::uint16_t>(payloadSize);
+            std::strncpy(packet.name, name.c_str(), sizeof(packet.name) - 1);
+            std::strncpy(packet.channel, channel.c_str(), sizeof(packet.channel) - 1);
+            std::strncpy(packet.filename, cleanName.c_str(), sizeof(packet.filename) - 1);
+            std::memcpy(packet.payload, bytes.data() + offset, payloadSize);
+
+            const std::size_t packetBytes = offsetof(Packet, payload) + payloadSize;
+            sentAny = sendRaw(destination, &packet, packetBytes) || sentAny;
+            if ((index & 31u) == 31u) Sleep(1);
+        }
+        return sentAny;
     }
 
     bool resolveStunServer()
     {
         if (stunServerReady) return true;
-
         addrinfo hints{};
         hints.ai_family = AF_INET;
         hints.ai_socktype = SOCK_DGRAM;
@@ -268,7 +349,6 @@ struct ChatNet::Impl {
             if (results) freeaddrinfo(results);
             return false;
         }
-
         stunServer = *reinterpret_cast<sockaddr_in*>(results->ai_addr);
         freeaddrinfo(results);
         stunServerReady = true;
@@ -278,17 +358,14 @@ struct ChatNet::Impl {
     void requestStun()
     {
         if (socket == INVALID_SOCKET || !resolveStunServer()) return;
-
         std::array<unsigned char, 20> request{};
-        writeU16(request.data(), 0x0001); // Binding Request
+        writeU16(request.data(), 0x0001);
         writeU16(request.data() + 2, 0);
         writeU32(request.data() + 4, kStunCookie);
 
-        std::uint32_t seed = makeId();
-        std::mt19937 rng(seed);
+        std::mt19937 rng(makeId());
         for (unsigned char& byte : stunTransaction) byte = static_cast<unsigned char>(rng() & 0xff);
         std::memcpy(request.data() + 8, stunTransaction.data(), stunTransaction.size());
-
         sendRaw(stunServer, request.data(), request.size());
         nextStun = std::chrono::steady_clock::now() + kStunRetry;
     }
@@ -301,7 +378,6 @@ struct ChatNet::Impl {
         const std::size_t messageLength = readU16(data + 2);
         const std::size_t end = std::min(size, 20u + messageLength);
         std::size_t offset = 20;
-
         while (offset + 4 <= end) {
             const std::uint16_t type = readU16(data + offset);
             const std::uint16_t length = readU16(data + offset + 2);
@@ -315,7 +391,6 @@ struct ChatNet::Impl {
                     port ^= static_cast<std::uint16_t>(kStunCookie >> 16);
                     address ^= kStunCookie;
                 }
-
                 in_addr ipv4{};
                 ipv4.s_addr = htonl(address);
                 char ip[INET_ADDRSTRLEN]{};
@@ -324,7 +399,6 @@ struct ChatNet::Impl {
                     return true;
                 }
             }
-
             offset = value + length;
             while ((offset & 3u) != 0u) ++offset;
         }
@@ -346,7 +420,7 @@ struct ChatNet::Impl {
         });
         if (existing != targets.end()) {
             existing->nextHello = std::chrono::steady_clock::now();
-            sendPacketTo(existing->address, kHello, {}, 0, {});
+            sendControl(existing->address, kHello, {}, {});
             return true;
         }
 
@@ -355,7 +429,7 @@ struct ChatNet::Impl {
         target.address = address;
         target.nextHello = std::chrono::steady_clock::now();
         targets.push_back(target);
-        sendPacketTo(address, kHello, {}, 0, {});
+        sendControl(address, kHello, {}, {});
         return true;
     }
 };
@@ -387,7 +461,6 @@ bool ChatNet::start(const std::string& name, std::uint16_t port)
     BOOL reuse = TRUE;
     setsockopt(impl_->socket, SOL_SOCKET, SO_REUSEADDR,
                reinterpret_cast<const char*>(&reuse), sizeof(reuse));
-
     BOOL broadcast = TRUE;
     setsockopt(impl_->socket, SOL_SOCKET, SO_BROADCAST,
                reinterpret_cast<const char*>(&broadcast), sizeof(broadcast));
@@ -414,6 +487,7 @@ bool ChatNet::start(const std::string& name, std::uint16_t port)
     impl_->name = name.empty() ? "PLAYER" : name.substr(0, 31);
     impl_->peerMap.clear();
     impl_->targets.clear();
+    impl_->incoming.clear();
 
     impl_->broadcast = {};
     impl_->broadcast.sin_family = AF_INET;
@@ -425,7 +499,7 @@ bool ChatNet::start(const std::string& name, std::uint16_t port)
     impl_->nextBroadcastHello = std::chrono::steady_clock::now();
     impl_->nextStun = std::chrono::steady_clock::now();
 
-    impl_->sendPacketTo(impl_->broadcast, kHello, {}, 0, {});
+    impl_->sendControl(impl_->broadcast, kHello, {}, {});
     impl_->requestStun();
     return true;
 }
@@ -433,19 +507,18 @@ bool ChatNet::start(const std::string& name, std::uint16_t port)
 void ChatNet::stop()
 {
     if (!impl_) return;
-
     if (impl_->socket != INVALID_SOCKET) {
         closesocket(impl_->socket);
         impl_->socket = INVALID_SOCKET;
     }
     impl_->peerMap.clear();
     impl_->targets.clear();
+    impl_->incoming.clear();
     impl_->listenPort = 0;
     impl_->localId = 0;
     impl_->publicAddress.clear();
     impl_->localAddress.clear();
     impl_->stunServerReady = false;
-
     if (impl_->winsockStarted) {
         WSACleanup();
         impl_->winsockStarted = false;
@@ -461,35 +534,28 @@ std::vector<Event> ChatNet::update()
 {
     std::vector<Event> events;
     if (!isRunning()) return events;
-
     const auto now = std::chrono::steady_clock::now();
 
     if (now >= impl_->nextBroadcastHello) {
-        impl_->sendPacketTo(impl_->broadcast, kHello, {}, 0, {});
+        impl_->sendControl(impl_->broadcast, kHello, {}, {});
         impl_->nextBroadcastHello = now + kHelloInterval;
     }
-
     for (Target& target : impl_->targets) {
         if (now >= target.nextHello) {
-            impl_->sendPacketTo(target.address, kHello, {}, 0, {});
+            impl_->sendControl(target.address, kHello, {}, {});
             target.nextHello = now + kHelloInterval;
         }
     }
-
     if (impl_->publicAddress.empty() && now >= impl_->nextStun) impl_->requestStun();
 
     for (;;) {
-        std::array<unsigned char, 2048> buffer{};
+        std::array<unsigned char, 1400> buffer{};
         sockaddr_in from{};
         int fromLen = sizeof(from);
-        const int received = recvfrom(
-            impl_->socket,
-            reinterpret_cast<char*>(buffer.data()),
-            static_cast<int>(buffer.size()),
-            0,
-            reinterpret_cast<sockaddr*>(&from),
-            &fromLen);
-
+        const int received = recvfrom(impl_->socket,
+                                      reinterpret_cast<char*>(buffer.data()),
+                                      static_cast<int>(buffer.size()), 0,
+                                      reinterpret_cast<sockaddr*>(&from), &fromLen);
         if (received == SOCKET_ERROR) {
             const int code = WSAGetLastError();
             if (code == WSAEWOULDBLOCK) break;
@@ -499,11 +565,13 @@ std::vector<Event> ChatNet::update()
 
         const std::size_t size = static_cast<std::size_t>(received);
         if (impl_->parseStun(buffer.data(), size)) continue;
-        if (size < sizeof(Packet)) continue;
+        if (size < offsetof(Packet, payload)) continue;
 
         Packet packet{};
-        std::memcpy(&packet, buffer.data(), sizeof(packet));
+        const std::size_t copySize = std::min(size, sizeof(Packet));
+        std::memcpy(&packet, buffer.data(), copySize);
         if (packet.magic != kMagic || packet.version != kVersion || packet.senderId == impl_->localId) continue;
+        if (packet.payloadSize > kStickerChunkBytes || offsetof(Packet, payload) + packet.payloadSize > size) continue;
 
         const std::string sourceEndpoint = endpointFromSockaddr(from);
         const std::string peerName = trimField(packet.name, sizeof(packet.name));
@@ -518,7 +586,13 @@ std::vector<Event> ChatNet::update()
             peer.address = sourceEndpoint.substr(0, sourceEndpoint.find(':'));
             peer.port = ntohs(from.sin_port);
             it = impl_->peerMap.emplace(packet.senderId, Impl::PeerState{peer, now}).first;
-            events.push_back(Event{EventType::PeerJoined, peer.id, peer.name, {}, 0, {}, sourceEndpoint});
+
+            Event joined;
+            joined.type = EventType::PeerJoined;
+            joined.peerId = peer.id;
+            joined.name = peer.name;
+            joined.endpoint = sourceEndpoint;
+            events.push_back(std::move(joined));
         } else {
             it->second.lastSeen = now;
             if (!peerName.empty()) it->second.peer.name = peerName;
@@ -526,61 +600,99 @@ std::vector<Event> ChatNet::update()
             it->second.peer.port = ntohs(from.sin_port);
         }
 
-        if (isNew || packet.type == kHello) {
-            impl_->sendPacketTo(from, kHello, {}, 0, {});
-        }
+        if (isNew || packet.type == kHello) impl_->sendControl(from, kHello, {}, {});
 
-        if (packet.type == kChat) {
-            const std::string text = trimField(packet.text, sizeof(packet.text));
-            if (!text.empty()) {
-                events.push_back(Event{EventType::Message, packet.senderId, it->second.peer.name,
-                                       text, 0, channel, sourceEndpoint});
+        if (packet.type == kChat && packet.payloadSize > 0) {
+            Event message;
+            message.type = EventType::Message;
+            message.peerId = packet.senderId;
+            message.name = it->second.peer.name;
+            message.text.assign(reinterpret_cast<const char*>(packet.payload), packet.payloadSize);
+            message.channel = channel;
+            message.endpoint = sourceEndpoint;
+            events.push_back(std::move(message));
+        } else if (packet.type == kStickerChunk) {
+            if (packet.chunkCount == 0 || packet.chunkIndex >= packet.chunkCount ||
+                packet.totalSize == 0 || packet.totalSize > kMaxStickerBytes) continue;
+
+            const std::size_t offset = static_cast<std::size_t>(packet.chunkIndex) * kStickerChunkBytes;
+            if (offset + packet.payloadSize > packet.totalSize) continue;
+
+            const std::uint64_t key = (static_cast<std::uint64_t>(packet.senderId) << 32) | packet.transferId;
+            auto transferIt = impl_->incoming.find(key);
+            if (transferIt == impl_->incoming.end()) {
+                Impl::IncomingSticker incoming;
+                incoming.senderId = packet.senderId;
+                incoming.senderName = it->second.peer.name;
+                incoming.endpoint = sourceEndpoint;
+                incoming.channel = channel;
+                incoming.filename = safeFilename(trimField(packet.filename, sizeof(packet.filename)));
+                incoming.chunkCount = packet.chunkCount;
+                incoming.totalSize = packet.totalSize;
+                incoming.data.resize(packet.totalSize);
+                incoming.received.assign(packet.chunkCount, 0);
+                incoming.lastSeen = now;
+                transferIt = impl_->incoming.emplace(key, std::move(incoming)).first;
             }
-        } else if (packet.type == kSticker && packet.stickerId >= 1 && packet.stickerId <= 4) {
-            events.push_back(Event{EventType::Sticker, packet.senderId, it->second.peer.name,
-                                   {}, packet.stickerId, channel, sourceEndpoint});
+
+            auto& incoming = transferIt->second;
+            if (incoming.chunkCount != packet.chunkCount || incoming.totalSize != packet.totalSize) {
+                impl_->incoming.erase(transferIt);
+                continue;
+            }
+            incoming.lastSeen = now;
+            if (!incoming.received[packet.chunkIndex]) {
+                std::memcpy(incoming.data.data() + offset, packet.payload, packet.payloadSize);
+                incoming.received[packet.chunkIndex] = 1;
+                ++incoming.receivedCount;
+            }
+
+            if (incoming.receivedCount == incoming.chunkCount) {
+                Event sticker;
+                sticker.type = EventType::StickerImage;
+                sticker.peerId = incoming.senderId;
+                sticker.name = incoming.senderName;
+                sticker.channel = incoming.channel;
+                sticker.endpoint = incoming.endpoint;
+                sticker.stickerFilename = incoming.filename;
+                sticker.stickerData = std::move(incoming.data);
+                events.push_back(std::move(sticker));
+                impl_->incoming.erase(transferIt);
+            }
         }
     }
 
     for (auto it = impl_->peerMap.begin(); it != impl_->peerMap.end();) {
         if (now - it->second.lastSeen > kPeerTimeout) {
-            const std::string endpoint = it->second.peer.endpoint();
-            events.push_back(Event{EventType::PeerLeft, it->second.peer.id, it->second.peer.name,
-                                   {}, 0, {}, endpoint});
+            Event left;
+            left.type = EventType::PeerLeft;
+            left.peerId = it->second.peer.id;
+            left.name = it->second.peer.name;
+            left.endpoint = it->second.peer.endpoint();
+            events.push_back(std::move(left));
             it = impl_->peerMap.erase(it);
         } else {
             ++it;
         }
     }
-
+    for (auto it = impl_->incoming.begin(); it != impl_->incoming.end();) {
+        if (now - it->second.lastSeen > kTransferTimeout) it = impl_->incoming.erase(it);
+        else ++it;
+    }
     return events;
 }
 
 bool ChatNet::addFriendAddress(const std::string& endpoint)
 {
-    if (!isRunning()) return false;
-    return impl_->addTarget(endpoint);
+    return isRunning() && impl_->addTarget(endpoint);
 }
 
 bool ChatNet::sendChat(const std::string& text)
 {
     if (!isRunning() || text.empty()) return false;
-    bool sent = impl_->sendPacketTo(impl_->broadcast, kChat,
-                                    text.substr(0, sizeof(Packet::text) - 1), 0, {});
-    for (const Target& target : impl_->targets) {
-        sent = impl_->sendPacketTo(target.address, kChat,
-                                   text.substr(0, sizeof(Packet::text) - 1), 0, {}) || sent;
-    }
-    return sent;
-}
-
-bool ChatNet::sendSticker(std::uint8_t stickerId)
-{
-    if (!isRunning() || stickerId < 1 || stickerId > 4) return false;
-    bool sent = impl_->sendPacketTo(impl_->broadcast, kSticker, {}, stickerId, {});
-    for (const Target& target : impl_->targets) {
-        sent = impl_->sendPacketTo(target.address, kSticker, {}, stickerId, {}) || sent;
-    }
+    const std::string clipped = text.substr(0, kStickerChunkBytes);
+    bool sent = impl_->sendControl(impl_->broadcast, kChat, clipped, {});
+    for (const Target& target : impl_->targets) sent = impl_->sendControl(target.address, kChat, clipped, {}) || sent;
     return sent;
 }
 
@@ -588,26 +700,12 @@ bool ChatNet::sendChatTo(const std::string& endpoint, const std::string& text)
 {
     if (!isRunning() || text.empty()) return false;
     sockaddr_in address{};
-    std::string normalized;
-    std::string parseError;
+    std::string normalized, parseError;
     if (!parseEndpoint(endpoint, impl_->listenPort, address, normalized, parseError)) {
         impl_->error = parseError;
         return false;
     }
-    return impl_->sendPacketTo(address, kChat, text.substr(0, sizeof(Packet::text) - 1), 0, {});
-}
-
-bool ChatNet::sendStickerTo(const std::string& endpoint, std::uint8_t stickerId)
-{
-    if (!isRunning() || stickerId < 1 || stickerId > 4) return false;
-    sockaddr_in address{};
-    std::string normalized;
-    std::string parseError;
-    if (!parseEndpoint(endpoint, impl_->listenPort, address, normalized, parseError)) {
-        impl_->error = parseError;
-        return false;
-    }
-    return impl_->sendPacketTo(address, kSticker, {}, stickerId, {});
+    return impl_->sendControl(address, kChat, text.substr(0, kStickerChunkBytes), {});
 }
 
 bool ChatNet::sendGroup(const std::string& channel,
@@ -618,51 +716,72 @@ bool ChatNet::sendGroup(const std::string& channel,
     bool sent = false;
     for (const std::string& endpoint : endpoints) {
         sockaddr_in address{};
-        std::string normalized;
-        std::string parseError;
+        std::string normalized, parseError;
         if (!parseEndpoint(endpoint, impl_->listenPort, address, normalized, parseError)) continue;
-        sent = impl_->sendPacketTo(address, kChat,
-                                   text.substr(0, sizeof(Packet::text) - 1), 0,
-                                   channel.substr(0, sizeof(Packet::channel) - 1)) || sent;
+        sent = impl_->sendControl(address, kChat, text.substr(0, kStickerChunkBytes), channel.substr(0, 31)) || sent;
     }
     return sent;
 }
 
-bool ChatNet::sendGroupSticker(const std::string& channel,
-                               const std::vector<std::string>& endpoints,
-                               std::uint8_t stickerId)
+bool ChatNet::sendStickerFile(const std::string& filename,
+                              const std::vector<std::uint8_t>& bytes)
 {
-    if (!isRunning() || channel.empty() || endpoints.empty() || stickerId < 1 || stickerId > 4) return false;
+    if (!isRunning() || bytes.empty()) return false;
+    bool sent = false;
+    std::unordered_set<std::string> done;
+    for (const auto& entry : impl_->peerMap) {
+        sockaddr_in address{};
+        std::string normalized, parseError;
+        const std::string endpoint = entry.second.peer.endpoint();
+        if (!parseEndpoint(endpoint, impl_->listenPort, address, normalized, parseError)) continue;
+        if (done.insert(normalized).second) sent = impl_->sendSticker(address, filename, bytes, {}) || sent;
+    }
+    for (const Target& target : impl_->targets) {
+        if (done.insert(target.source).second) sent = impl_->sendSticker(target.address, filename, bytes, {}) || sent;
+    }
+    if (!sent && impl_->peerMap.empty() && impl_->targets.empty()) impl_->error = "no recipients for sticker";
+    return sent;
+}
+
+bool ChatNet::sendStickerFileTo(const std::string& endpoint,
+                                const std::string& filename,
+                                const std::vector<std::uint8_t>& bytes)
+{
+    if (!isRunning() || bytes.empty()) return false;
+    sockaddr_in address{};
+    std::string normalized, parseError;
+    if (!parseEndpoint(endpoint, impl_->listenPort, address, normalized, parseError)) {
+        impl_->error = parseError;
+        return false;
+    }
+    return impl_->sendSticker(address, filename, bytes, {});
+}
+
+bool ChatNet::sendGroupStickerFile(const std::string& channel,
+                                   const std::vector<std::string>& endpoints,
+                                   const std::string& filename,
+                                   const std::vector<std::uint8_t>& bytes)
+{
+    if (!isRunning() || channel.empty() || endpoints.empty() || bytes.empty()) return false;
     bool sent = false;
     for (const std::string& endpoint : endpoints) {
         sockaddr_in address{};
-        std::string normalized;
-        std::string parseError;
+        std::string normalized, parseError;
         if (!parseEndpoint(endpoint, impl_->listenPort, address, normalized, parseError)) continue;
-        sent = impl_->sendPacketTo(address, kSticker, {}, stickerId,
-                                   channel.substr(0, sizeof(Packet::channel) - 1)) || sent;
+        sent = impl_->sendSticker(address, filename, bytes, channel.substr(0, 31)) || sent;
     }
     return sent;
 }
 
-const std::string& ChatNet::localName() const noexcept
-{
-    return impl_->name;
-}
-
-std::uint16_t ChatNet::port() const noexcept
-{
-    return impl_->listenPort;
-}
+const std::string& ChatNet::localName() const noexcept { return impl_->name; }
+std::uint16_t ChatNet::port() const noexcept { return impl_->listenPort; }
 
 std::vector<Peer> ChatNet::peers() const
 {
     std::vector<Peer> result;
     result.reserve(impl_->peerMap.size());
     for (const auto& entry : impl_->peerMap) result.push_back(entry.second.peer);
-    std::sort(result.begin(), result.end(), [](const Peer& a, const Peer& b) {
-        return a.name < b.name;
-    });
+    std::sort(result.begin(), result.end(), [](const Peer& a, const Peer& b) { return a.name < b.name; });
     return result;
 }
 
@@ -674,19 +793,8 @@ std::vector<std::string> ChatNet::savedAddresses() const
     return result;
 }
 
-const std::string& ChatNet::publicEndpoint() const noexcept
-{
-    return impl_->publicAddress;
-}
-
-const std::string& ChatNet::localEndpoint() const noexcept
-{
-    return impl_->localAddress;
-}
-
-const std::string& ChatNet::lastError() const noexcept
-{
-    return impl_->error;
-}
+const std::string& ChatNet::publicEndpoint() const noexcept { return impl_->publicAddress; }
+const std::string& ChatNet::localEndpoint() const noexcept { return impl_->localAddress; }
+const std::string& ChatNet::lastError() const noexcept { return impl_->error; }
 
 } // namespace chatnet
