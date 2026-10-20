@@ -1,3 +1,19 @@
+struct GlyphMetrics {
+    int left;
+    int top;
+    int width;
+    int height;
+};
+
+static constexpr GlyphMetrics kGlyphMetrics[36] = {
+    {8,4,31,47}, {8,4,31,47}, {12,4,23,47}, {8,4,31,47}, {12,4,23,47}, {12,4,23,47},
+    {8,4,31,47}, {8,4,31,47}, {20,4,8,47}, {18,4,11,48}, {8,4,31,47}, {12,4,23,47},
+    {4,11,40,34}, {8,4,31,47}, {8,4,31,47}, {8,4,31,47}, {8,4,31,47}, {8,4,31,47},
+    {8,4,31,47}, {12,4,23,47}, {8,4,31,47}, {4,4,39,47}, {4,11,40,34}, {8,4,31,47},
+    {4,4,39,47}, {8,4,31,47}, {8,4,31,47}, {12,4,23,47}, {8,4,31,47}, {8,4,31,47},
+    {8,4,31,47}, {8,4,31,47}, {8,4,31,47}, {8,4,31,47}, {8,4,31,47}, {8,4,31,47}
+};
+
 int sourceGlyphIndex(wchar_t ch) {
     if (ch >= L'a' && ch <= L'z') ch = static_cast<wchar_t>(ch - L'a' + L'A');
     if (ch >= L'A' && ch <= L'Z') return static_cast<int>(ch - L'A');
@@ -5,9 +21,16 @@ int sourceGlyphIndex(wchar_t ch) {
     return -1;
 }
 
+int glyphRenderedWidth(int index, int height) {
+    if (index < 0 || index >= 36) return std::max(4, height / 2 + 2);
+    const GlyphMetrics& m = kGlyphMetrics[index];
+    return std::max(1, (m.width * height + m.height / 2) / m.height);
+}
+
 int glyphAdvanceFor(wchar_t ch, int height) {
     if (ch == L' ') return std::max(4, height / 2);
-    if (sourceGlyphIndex(ch) >= 0) return std::max(6, height);
+    const int index = sourceGlyphIndex(ch);
+    if (index >= 0) return glyphRenderedWidth(index, height) + std::max(1, height / 6);
     return std::max(4, height / 2 + 2);
 }
 
@@ -58,14 +81,16 @@ void drawPixelText(App& app, HDC dc, const std::wstring& source, int x, int y, i
 
         const int index = sourceGlyphIndex(ch);
         if (index >= 0 && app.pixelFont && app.pixelFont->GetLastStatus() == Gdiplus::Ok) {
+            const GlyphMetrics& m = kGlyphMetrics[index];
             const int col = index % 10;
             const int row = index / 10;
-            const Gdiplus::Rect dest(cursor, y, height, height);
+            const int destWidth = glyphRenderedWidth(index, height);
+            const Gdiplus::Rect dest(cursor, y, destWidth, height);
             graphics.DrawImage(app.pixelFont.get(), dest,
-                               col * kFontCellWidth,
-                               row * kFontCellHeight + kFontVisibleTop,
-                               kFontCellWidth,
-                               kFontVisibleHeight,
+                               col * kFontCellWidth + m.left,
+                               row * kFontCellHeight + m.top,
+                               m.width,
+                               m.height,
                                Gdiplus::UnitPixel,
                                &tint);
         } else {
