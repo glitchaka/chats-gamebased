@@ -1,4 +1,5 @@
 #include "ChatNet.h"
+#include "AudioNet.h"
 #include "SoundFx.h"
 #include "resource.h"
 
@@ -36,7 +37,7 @@ constexpr int kWindowHeight = 620;
 constexpr int kUnreadWidth = 190;
 constexpr int kUnreadHeight = 50;
 constexpr int kUnreadMax = 10;
-constexpr std::size_t kMaxStickerBytes = 512u * 1024u;
+constexpr std::size_t kMaxLocalAttachmentBytes = 16u * 1024u * 1024u;
 
 struct Theme {
     const wchar_t* name;
@@ -61,7 +62,7 @@ const Theme kThemes[] = {
 };
 
 struct ChatLine {
-    enum class Kind { Text, Sticker } kind{Kind::Text};
+    enum class Kind { Text, Sticker, Audio } kind{Kind::Text};
     std::wstring name;
     std::wstring text;
     std::wstring channel;
@@ -87,6 +88,7 @@ struct App {
     HFONT smallEditFont{};
 
     chatnet::ChatNet net;
+    audionet::AudioNet audioNet;
     sfx::SoundFx sounds;
     std::vector<ChatLine> lines;
     std::vector<FriendItem> friends;
@@ -113,10 +115,12 @@ struct App {
     RECT allRect{};
     RECT sendRect{};
     RECT stickerButtonRect{};
+    RECT audioButtonRect{};
     RECT stickerImportRect{};
     RECT friendRows[7]{};
     RECT groupRows[4]{};
     std::vector<RECT> stickerMenuRects;
+    std::vector<std::pair<RECT, std::filesystem::path>> audioHitRects;
     std::wstring status;
 };
 
@@ -168,14 +172,13 @@ std::filesystem::path executableDirectory() {
     return std::filesystem::path(std::wstring(buffer, buffer + count)).parent_path();
 }
 
-// Keep runtime files portable: never write stickers or received images into
-// %LOCALAPPDATA%. Anything the app must retain stays beside the executable.
 std::filesystem::path appDataDirectory() {
     return executableDirectory() / L"data";
 }
 
 std::filesystem::path stickerDirectory() { return appDataDirectory() / L"stickers"; }
 std::filesystem::path receivedDirectory() { return appDataDirectory() / L"received"; }
+std::filesystem::path receivedAudioDirectory() { return receivedDirectory() / L"audio"; }
 
 bool isImageExtension(std::filesystem::path path) {
     std::wstring ext = path.extension().wstring();
@@ -183,11 +186,18 @@ bool isImageExtension(std::filesystem::path path) {
     return ext == L".png" || ext == L".jpg" || ext == L".jpeg" || ext == L".bmp";
 }
 
+bool isAudioExtension(std::filesystem::path path) {
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".mp3" || ext == L".wav" || ext == L".ogg" || ext == L".m4a" ||
+           ext == L".aac" || ext == L".flac" || ext == L".wma";
+}
+
 std::vector<std::uint8_t> readBytes(const std::filesystem::path& path) {
     std::ifstream file(path, std::ios::binary | std::ios::ate);
     if (!file) return {};
     const auto size = file.tellg();
-    if (size <= 0 || static_cast<std::uint64_t>(size) > kMaxStickerBytes) return {};
+    if (size <= 0 || static_cast<std::uint64_t>(size) > kMaxLocalAttachmentBytes) return {};
     std::vector<std::uint8_t> bytes(static_cast<std::size_t>(size));
     file.seekg(0);
     file.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
