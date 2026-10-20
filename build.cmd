@@ -77,7 +77,16 @@ if not errorlevel 1 (
 :build
 cmake --build "%BUILD_DIR%" --parallel || exit /b 1
 
+rem The app intentionally stays alive in the tray when its window is closed.
+rem Stop any running copy before replacing the portable distribution files.
+taskkill /IM chats-gamebased.exe /F >nul 2>nul
+
 if exist "%DIST_DIR%" rmdir /s /q "%DIST_DIR%"
+if exist "%DIST_DIR%" (
+  echo ERROR: No se pudo limpiar %DIST_DIR%. Hay archivos bloqueados por otro proceso.
+  exit /b 1
+)
+
 cmake --install "%BUILD_DIR%" --config Release --prefix "%DIST_DIR%" || exit /b 1
 
 if not exist "%DIST_DIR%\chats-gamebased.exe" (
