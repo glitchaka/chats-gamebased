@@ -8,11 +8,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 add_executable(chats-gamebased WIN32
     src/main.cpp
     src/ChatNet.cpp
+    src/SoundFx.cpp
 )
 
 target_include_directories(chats-gamebased PRIVATE src)
 target_compile_definitions(chats-gamebased PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi)
+target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi winmm gdiplus)
 
 if(MSVC)
     target_compile_options(chats-gamebased PRIVATE /W4 /permissive- /utf-8)
