@@ -12,15 +12,14 @@ add_executable(chats-gamebased WIN32
 )
 
 target_include_directories(chats-gamebased PRIVATE src)
-target_compile_definitions(chats-gamebased PRIVATE UNICODE _UNICODE NOMINMAX)
+target_compile_definitions(chats-gamebased PRIVATE UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi winmm gdiplus ole32)
 
-# GDI+ imaging interfaces use COM types declared by objidl.h. Force it before
-# gdiplus.h so WIN32_LEAN_AND_MEAN builds work on current Windows SDKs.
 if(MSVC)
-    target_compile_options(chats-gamebased PRIVATE /W4 /permissive- /utf-8 /FIobjidl.h)
+    target_compile_options(chats-gamebased PRIVATE /W4 /permissive- /utf-8)
+    set_source_files_properties(src/main.cpp PROPERTIES COMPILE_OPTIONS "/FIobjidl.h")
 elseif(MINGW)
-    target_compile_options(chats-gamebased PRIVATE -include objidl.h)
+    set_source_files_properties(src/main.cpp PROPERTIES COMPILE_OPTIONS "-include;objidl.h")
 endif()
 
 set_target_properties(chats-gamebased PROPERTIES
