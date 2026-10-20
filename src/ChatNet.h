@@ -17,7 +17,8 @@ struct Peer {
 enum class EventType {
     PeerJoined,
     PeerLeft,
-    Message
+    Message,
+    Sticker
 };
 
 struct Event {
@@ -25,6 +26,7 @@ struct Event {
     std::uint32_t peerId{};
     std::string name;
     std::string text;
+    std::uint8_t stickerId{};
 };
 
 class ChatNet {
@@ -43,6 +45,7 @@ public:
 
     std::vector<Event> update();
     bool sendChat(const std::string& text);
+    bool sendSticker(std::uint8_t stickerId);
 
     const std::string& localName() const noexcept;
     std::uint16_t port() const noexcept;
