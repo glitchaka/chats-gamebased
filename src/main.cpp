@@ -1,4 +1,5 @@
 #include "ChatNet.h"
+#include "SoundFx.h"
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -28,10 +29,13 @@ constexpr COLORREF kText = RGB(222, 244, 250);
 constexpr COLORREF kMuted = RGB(103, 154, 165);
 constexpr COLORREF kGreen = RGB(71, 197, 157);
 constexpr COLORREF kRed = RGB(232, 94, 94);
+constexpr COLORREF kGold = RGB(220, 203, 79);
 
 struct ChatLine {
+    enum class Kind { Text, Sticker } kind{Kind::Text};
     std::wstring name;
     std::wstring text;
+    std::uint8_t stickerId{};
     bool local{};
 };
 
@@ -44,9 +48,11 @@ struct App {
     HFONT bodyFont{};
     HFONT smallFont{};
     chatnet::ChatNet net;
+    sfx::SoundFx sounds;
     std::vector<ChatLine> lines;
     RECT sendRect{};
     RECT closeRect{};
+    RECT stickerRects[4]{};
     std::wstring status;
 };
 
@@ -86,7 +92,7 @@ HFONT makeFont(int height, int weight)
     return CreateFontW(
         -height, 0, 0, 0, weight, FALSE, FALSE, FALSE,
         DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-        CLEARTYPE_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
+        NONANTIALIASED_QUALITY, FIXED_PITCH | FF_MODERN, L"Consolas");
 }
 
 void drawChamferedBox(HDC dc, const RECT& rect, COLORREF fill, COLORREF border, int cut = 8)
@@ -122,6 +128,56 @@ void drawText(HDC dc, const std::wstring& text, RECT rect, HFONT font, COLORREF 
     SelectObject(dc, oldFont);
 }
 
+void fillRect(HDC dc, const RECT& r, COLORREF color)
+{
+    HBRUSH brush = CreateSolidBrush(color);
+    FillRect(dc, &r, brush);
+    DeleteObject(brush);
+}
+
+void drawSticker(HDC dc, const RECT& bounds, std::uint8_t id)
+{
+    const int w = bounds.right - bounds.left;
+    const int h = bounds.bottom - bounds.top;
+    const int s = std::max(2, std::min(w, h) / 10);
+    const int cx = (bounds.left + bounds.right) / 2;
+    const int cy = (bounds.top + bounds.bottom) / 2;
+
+    drawChamferedBox(dc, bounds, RGB(7, 36, 43), kCyan, std::max(4, s));
+
+    auto px = [&](int x, int y, int ww, int hh, COLORREF color) {
+        RECT r{bounds.left + x * s, bounds.top + y * s,
+               bounds.left + (x + ww) * s, bounds.top + (y + hh) * s};
+        fillRect(dc, r, color);
+    };
+
+    switch (id) {
+    case 1: // heart
+        px(2, 2, 2, 2, kRed); px(6, 2, 2, 2, kRed);
+        px(1, 3, 8, 3, kRed); px(2, 6, 6, 1, kRed);
+        px(3, 7, 4, 1, kRed); px(4, 8, 2, 1, kRed);
+        break;
+    case 2: // bolt
+        px(5, 1, 3, 2, kGold); px(4, 3, 3, 2, kGold);
+        px(3, 5, 4, 2, kGold); px(2, 7, 3, 1, kGold);
+        px(4, 7, 2, 2, kGold); px(3, 9, 1, 1, kGold);
+        break;
+    case 3: // smile terminal
+        px(2, 2, 6, 1, kGreen); px(1, 3, 1, 5, kGreen); px(8, 3, 1, 5, kGreen);
+        px(2, 8, 6, 1, kGreen); px(3, 4, 1, 1, kCyanBright); px(6, 4, 1, 1, kCyanBright);
+        px(3, 6, 1, 1, kCyanBright); px(4, 7, 2, 1, kCyanBright); px(6, 6, 1, 1, kCyanBright);
+        break;
+    case 4: // skull
+        px(3, 2, 4, 1, kText); px(2, 3, 6, 4, kText); px(3, 7, 4, 2, kText);
+        px(3, 4, 1, 2, kBg); px(6, 4, 1, 2, kBg); px(4, 6, 2, 1, kBg);
+        px(4, 8, 1, 1, kBg); px(6, 8, 1, 1, kBg);
+        break;
+    default:
+        SetPixel(dc, cx, cy, kCyanBright);
+        break;
+    }
+}
+
 void trimHistory(App& app)
 {
     constexpr std::size_t kMaxHistory = 100;
@@ -146,9 +202,33 @@ void sendCurrentMessage(App& app)
     const std::string utf8 = wideToUtf8(text);
     if (!app.net.sendChat(utf8)) app.status = L"NETWORK SEND FAILED";
 
-    app.lines.push_back(ChatLine{utf8ToWide(app.net.localName()), text, true});
+    ChatLine line;
+    line.kind = ChatLine::Kind::Text;
+    line.name = utf8ToWide(app.net.localName());
+    line.text = text;
+    line.local = true;
+    app.lines.push_back(std::move(line));
     trimHistory(app);
     SetWindowTextW(app.edit, L"");
+    app.sounds.play(sfx::Cue::Click);
+    InvalidateRect(app.hwnd, nullptr, FALSE);
+}
+
+void sendSticker(App& app, std::uint8_t stickerId)
+{
+    if (!app.net.sendSticker(stickerId)) {
+        app.status = L"STICKER SEND FAILED";
+        return;
+    }
+
+    ChatLine line;
+    line.kind = ChatLine::Kind::Sticker;
+    line.name = utf8ToWide(app.net.localName());
+    line.stickerId = stickerId;
+    line.local = true;
+    app.lines.push_back(std::move(line));
+    trimHistory(app);
+    app.sounds.play(sfx::Cue::Sticker);
     InvalidateRect(app.hwnd, nullptr, FALSE);
 }
 
@@ -157,8 +237,22 @@ void updateNetwork(App& app)
     bool changed = false;
     for (const auto& event : app.net.update()) {
         if (event.type == chatnet::EventType::Message) {
-            app.lines.push_back(ChatLine{utf8ToWide(event.name), utf8ToWide(event.text), false});
+            ChatLine line;
+            line.kind = ChatLine::Kind::Text;
+            line.name = utf8ToWide(event.name);
+            line.text = utf8ToWide(event.text);
+            app.lines.push_back(std::move(line));
             trimHistory(app);
+            app.sounds.play(sfx::Cue::Incoming);
+            changed = true;
+        } else if (event.type == chatnet::EventType::Sticker) {
+            ChatLine line;
+            line.kind = ChatLine::Kind::Sticker;
+            line.name = utf8ToWide(event.name);
+            line.stickerId = event.stickerId;
+            app.lines.push_back(std::move(line));
+            trimHistory(app);
+            app.sounds.play(sfx::Cue::Sticker);
             changed = true;
         } else {
             changed = true;
@@ -198,6 +292,12 @@ void layout(App& app)
     app.closeRect = RECT{706, 14, 738, 46};
     if (app.edit) {
         SetWindowPos(app.edit, nullptr, 38, 440, 588, 27, SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    const int startX = 562;
+    for (int i = 0; i < 4; ++i) {
+        const int x = startX + i * 41;
+        app.stickerRects[i] = RECT{x, 352, x + 34, 386};
     }
 }
 
@@ -247,25 +347,32 @@ void paint(App& app, HDC target)
     HRGN messageClip = CreateRectRgn(messages.left + 12, messages.top + 16, messages.right - 12, messages.bottom - 12);
     SelectClipRgn(dc, messageClip);
 
-    const int maxLines = 12;
-    const int start = std::max(0, static_cast<int>(app.lines.size()) - maxLines);
+    const int maxEntries = 9;
+    const int start = std::max(0, static_cast<int>(app.lines.size()) - maxEntries);
     int y = messages.top + 20;
     for (int i = start; i < static_cast<int>(app.lines.size()); ++i) {
         const auto& line = app.lines[static_cast<std::size_t>(i)];
-        RECT nameRect{messages.left + 16, y, messages.left + 150, y + 22};
-        RECT textRect{messages.left + 154, y, messages.right - 16, y + 22};
+        RECT nameRect{messages.left + 16, y, messages.left + 148, y + 22};
         drawText(dc, line.name + L":", nameRect, app.smallFont, line.local ? kCyanBright : kGreen,
                  DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        drawText(dc, line.text, textRect, app.smallFont, kText,
-                 DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
-        y += 24;
+
+        if (line.kind == ChatLine::Kind::Text) {
+            RECT textRect{messages.left + 154, y, messages.right - 16, y + 22};
+            drawText(dc, line.text, textRect, app.smallFont, kText,
+                     DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+            y += 25;
+        } else {
+            RECT stickerRect{messages.left + 154, y - 3, messages.left + 198, y + 41};
+            drawSticker(dc, stickerRect, line.stickerId);
+            y += 50;
+        }
     }
     SelectClipRgn(dc, nullptr);
     DeleteObject(messageClip);
 
     const auto peers = app.net.peers();
     int py = peersRect.top + 20;
-    for (std::size_t i = 0; i < peers.size() && i < 11; ++i) {
+    for (std::size_t i = 0; i < peers.size() && i < 7; ++i) {
         HBRUSH dot = CreateSolidBrush(kGreen);
         HGDIOBJ oldDotBrush = SelectObject(dc, dot);
         HGDIOBJ oldDotPen = SelectObject(dc, GetStockObject(NULL_PEN));
@@ -283,6 +390,10 @@ void paint(App& app, HDC target)
         RECT empty{peersRect.left + 16, peersRect.top + 22, peersRect.right - 12, peersRect.top + 62};
         drawText(dc, L"SEARCHING\nLAN...", empty, app.smallFont, kMuted, DT_LEFT | DT_WORDBREAK);
     }
+
+    RECT stickerLabel{562, 326, 724, 347};
+    drawText(dc, L"STICKERS", stickerLabel, app.smallFont, kOrange, DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+    for (int i = 0; i < 4; ++i) drawSticker(dc, app.stickerRects[i], static_cast<std::uint8_t>(i + 1));
 
     RECT inputOuter{24, 426, 636, 482};
     drawChamferedBox(dc, inputOuter, kPanel2, kCyan, 9);
@@ -355,6 +466,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     case WM_LBUTTONUP: {
         POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
         if (PtInRect(&app->closeRect, pt)) {
+            app->sounds.play(sfx::Cue::Click);
             DestroyWindow(hwnd);
             return 0;
         }
@@ -362,6 +474,12 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             sendCurrentMessage(*app);
             SetFocus(app->edit);
             return 0;
+        }
+        for (int i = 0; i < 4; ++i) {
+            if (PtInRect(&app->stickerRects[i], pt)) {
+                sendSticker(*app, static_cast<std::uint8_t>(i + 1));
+                return 0;
+            }
         }
         break;
     }
