@@ -24,16 +24,18 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Package
+      - name: Package portable distribution
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "build/bin/Release/chats-gamebased.exe" "dist/chats-gamebased.exe"
-          Copy-Item "assets" "dist/assets" -Recurse
+          Remove-Item "dist/chats-gamebased" -Recurse -Force -ErrorAction SilentlyContinue
+          cmake --install build --config Release --prefix "dist/chats-gamebased"
+          if (-not (Test-Path "dist/chats-gamebased/chats-gamebased.exe")) {
+            throw "portable executable was not produced"
+          }
 
-      - name: Upload executable
+      - name: Upload portable distribution
         uses: actions/upload-artifact@v4
         with:
           name: chats-gamebased-windows-x64
-          path: dist/**
+          path: dist/chats-gamebased/**
           if-no-files-found: error
