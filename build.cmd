@@ -7,6 +7,7 @@ where cmake >nul 2>nul || (
 )
 
 set "BUILD_DIR=build"
+set "DIST_DIR=dist\chats-gamebased"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
 set "VSROOT="
 
@@ -76,16 +77,16 @@ if not errorlevel 1 (
 :build
 cmake --build "%BUILD_DIR%" --parallel || exit /b 1
 
-if exist "%BUILD_DIR%\bin\chats-gamebased.exe" (
-  echo.
-  echo Ejecutable: %BUILD_DIR%\bin\chats-gamebased.exe
-  exit /b 0
-)
-if exist "%BUILD_DIR%\bin\Release\chats-gamebased.exe" (
-  echo.
-  echo Ejecutable: %BUILD_DIR%\bin\Release\chats-gamebased.exe
-  exit /b 0
+if exist "%DIST_DIR%" rmdir /s /q "%DIST_DIR%"
+cmake --install "%BUILD_DIR%" --config Release --prefix "%DIST_DIR%" || exit /b 1
+
+if not exist "%DIST_DIR%\chats-gamebased.exe" (
+  echo ERROR: La compilacion termino pero no se pudo crear la carpeta de distribucion.
+  exit /b 1
 )
 
-echo ERROR: La compilacion termino pero no se encontro chats-gamebased.exe.
-exit /b 1
+echo.
+echo Compilacion lista.
+echo Carpeta para distribuir: %DIST_DIR%
+echo Ejecutable: %DIST_DIR%\chats-gamebased.exe
+exit /b 0
