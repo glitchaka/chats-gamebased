@@ -5,7 +5,6 @@
 #include <windows.h>
 
 #include <algorithm>
-#include <array>
 #include <chrono>
 #include <cstring>
 #include <random>
@@ -16,9 +15,10 @@ namespace chatnet {
 namespace {
 
 constexpr std::uint32_t kMagic = 0x54484347; // GCHT
-constexpr std::uint8_t kVersion = 1;
+constexpr std::uint8_t kVersion = 2;
 constexpr std::uint8_t kHello = 1;
 constexpr std::uint8_t kChat = 2;
+constexpr std::uint8_t kSticker = 3;
 constexpr std::chrono::milliseconds kHelloInterval{1500};
 constexpr std::chrono::milliseconds kPeerTimeout{6500};
 
@@ -27,7 +27,8 @@ struct Packet {
     std::uint32_t magic{};
     std::uint8_t version{};
     std::uint8_t type{};
-    std::uint16_t reserved{};
+    std::uint8_t stickerId{};
+    std::uint8_t reserved{};
     std::uint32_t senderId{};
     char name[32]{};
     char text[384]{};
@@ -77,7 +78,7 @@ struct ChatNet::Impl {
     std::unordered_map<std::uint32_t, PeerState> peerMap;
     std::chrono::steady_clock::time_point nextHello{};
 
-    bool sendPacket(std::uint8_t type, const std::string& text)
+    bool sendPacket(std::uint8_t type, const std::string& text, std::uint8_t stickerId = 0)
     {
         if (socket == INVALID_SOCKET) return false;
 
@@ -85,6 +86,7 @@ struct ChatNet::Impl {
         packet.magic = kMagic;
         packet.version = kVersion;
         packet.type = type;
+        packet.stickerId = stickerId;
         packet.senderId = localId;
         std::strncpy(packet.name, name.c_str(), sizeof(packet.name) - 1);
         std::strncpy(packet.text, text.c_str(), sizeof(packet.text) - 1);
@@ -240,7 +242,7 @@ std::vector<Event> ChatNet::update()
             peer.address = ip;
             peer.port = ntohs(from.sin_port);
             it = impl_->peerMap.emplace(packet.senderId, Impl::PeerState{peer, now}).first;
-            events.push_back(Event{EventType::PeerJoined, peer.id, peer.name, {}});
+            events.push_back(Event{EventType::PeerJoined, peer.id, peer.name, {}, 0});
         } else {
             it->second.lastSeen = now;
             if (!peerName.empty()) it->second.peer.name = peerName;
@@ -251,14 +253,16 @@ std::vector<Event> ChatNet::update()
         if (packet.type == kChat) {
             const std::string text = trimField(packet.text, sizeof(packet.text));
             if (!text.empty()) {
-                events.push_back(Event{EventType::Message, packet.senderId, it->second.peer.name, text});
+                events.push_back(Event{EventType::Message, packet.senderId, it->second.peer.name, text, 0});
             }
+        } else if (packet.type == kSticker && packet.stickerId >= 1 && packet.stickerId <= 4) {
+            events.push_back(Event{EventType::Sticker, packet.senderId, it->second.peer.name, {}, packet.stickerId});
         }
     }
 
     for (auto it = impl_->peerMap.begin(); it != impl_->peerMap.end();) {
         if (now - it->second.lastSeen > kPeerTimeout) {
-            events.push_back(Event{EventType::PeerLeft, it->second.peer.id, it->second.peer.name, {}});
+            events.push_back(Event{EventType::PeerLeft, it->second.peer.id, it->second.peer.name, {}, 0});
             it = impl_->peerMap.erase(it);
         } else {
             ++it;
@@ -272,6 +276,12 @@ bool ChatNet::sendChat(const std::string& text)
 {
     if (!isRunning() || text.empty()) return false;
     return impl_->sendPacket(kChat, text.substr(0, sizeof(Packet::text) - 1));
+}
+
+bool ChatNet::sendSticker(std::uint8_t stickerId)
+{
+    if (!isRunning() || stickerId < 1 || stickerId > 4) return false;
+    return impl_->sendPacket(kSticker, {}, stickerId);
 }
 
 const std::string& ChatNet::localName() const noexcept
