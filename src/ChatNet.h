@@ -20,7 +20,7 @@ enum class EventType {
     PeerJoined,
     PeerLeft,
     Message,
-    Sticker
+    StickerImage
 };
 
 struct Event {
@@ -28,9 +28,13 @@ struct Event {
     std::uint32_t peerId{};
     std::string name;
     std::string text;
-    std::uint8_t stickerId{};
     std::string channel;
     std::string endpoint;
+
+    // Filled only for StickerImage events. The image is transported by the
+    // chat itself; the receiver does not need to own the same sticker file.
+    std::string stickerFilename;
+    std::vector<std::uint8_t> stickerData;
 };
 
 class ChatNet {
@@ -49,33 +53,32 @@ public:
 
     std::vector<Event> update();
 
-    // Adds a direct Internet/LAN target such as "203.0.113.7:34197" or "host.example:34197".
-    // The target is pinged immediately and then kept alive with HELLO packets.
     bool addFriendAddress(const std::string& endpoint);
 
-    // Sends to all currently known/saved targets. LAN broadcast is also kept as a discovery path.
     bool sendChat(const std::string& text);
-    bool sendSticker(std::uint8_t stickerId);
-
-    // Direct one-to-one delivery.
     bool sendChatTo(const std::string& endpoint, const std::string& text);
-    bool sendStickerTo(const std::string& endpoint, std::uint8_t stickerId);
-
-    // Group delivery is fan-out to the supplied friend endpoints, with a channel name in the packet.
     bool sendGroup(const std::string& channel,
                    const std::vector<std::string>& endpoints,
                    const std::string& text);
-    bool sendGroupSticker(const std::string& channel,
-                          const std::vector<std::string>& endpoints,
-                          std::uint8_t stickerId);
+
+    // Sticker images are user-selected files. They are fragmented into UDP
+    // packets and reconstructed by the receiver. No built-in sticker IDs or
+    // shared sticker pack are required.
+    bool sendStickerFile(const std::string& filename,
+                         const std::vector<std::uint8_t>& bytes);
+    bool sendStickerFileTo(const std::string& endpoint,
+                           const std::string& filename,
+                           const std::vector<std::uint8_t>& bytes);
+    bool sendGroupStickerFile(const std::string& channel,
+                              const std::vector<std::string>& endpoints,
+                              const std::string& filename,
+                              const std::vector<std::uint8_t>& bytes);
 
     const std::string& localName() const noexcept;
     std::uint16_t port() const noexcept;
     std::vector<Peer> peers() const;
     std::vector<std::string> savedAddresses() const;
 
-    // publicEndpoint() is discovered with STUN from the same UDP socket.
-    // It can be copied/shared as a friend address. Some restrictive NATs can still require a relay.
     const std::string& publicEndpoint() const noexcept;
     const std::string& localEndpoint() const noexcept;
     const std::string& lastError() const noexcept;
