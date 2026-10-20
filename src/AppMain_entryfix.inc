@@ -6,8 +6,12 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     App app;
     app.instance = instance;
     loadUiAssets(app);
-    if (!app.net.start(defaultPlayerName(), 34197)) {
+    const std::string playerName = defaultPlayerName();
+    if (!app.net.start(playerName, 34197)) {
         MessageBoxW(nullptr, utf8ToWide(app.net.lastError()).c_str(), L"Game Chat - network error", MB_ICONERROR | MB_OK);
+    }
+    if (!app.audioNet.start(playerName, 34197)) {
+        app.status = L"AUDIO TRANSPORT OFFLINE";
     }
 
     HICON icon = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(IDI_APP_ICON), IMAGE_ICON, 32, 32, LR_DEFAULTCOLOR));
@@ -40,6 +44,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     HWND hwnd = CreateWindowExW(WS_EX_TOPMOST | WS_EX_APPWINDOW, kWindowClass, L"Game Chat", WS_POPUP,
                                 x, y, kWindowWidth, kWindowHeight, nullptr, nullptr, instance, &app);
     if (!hwnd) {
+        app.audioNet.stop();
+        app.net.stop();
         Gdiplus::GdiplusShutdown(gdiplusToken);
         return 1;
     }
@@ -64,6 +70,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     if (app.unreadHwnd && IsWindow(app.unreadHwnd)) DestroyWindow(app.unreadHwnd);
+    app.audioNet.stop();
+    app.net.stop();
     Gdiplus::GdiplusShutdown(gdiplusToken);
     return static_cast<int>(msg.wParam);
 }
