@@ -23,7 +23,9 @@
 #include "AppMain_polishfix.inc"
 
 #define importSticker importStickerLibraryOnly
+#define sendUserSticker sendUserStickerLegacy
 #include "AppMain_part02.inc"
+#undef sendUserSticker
 #define unreadProc unreadProcLegacy
 #include "AppMain_part03.inc"
 #undef unreadProc
