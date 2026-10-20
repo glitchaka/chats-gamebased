@@ -17,7 +17,7 @@ target_compile_definitions(chats-gamebased PRIVATE UNICODE _UNICODE NOMINMAX WIN
 target_link_libraries(chats-gamebased PRIVATE ws2_32 dwmapi winmm gdiplus ole32 shell32 comdlg32)
 
 if(MSVC)
-    target_compile_options(chats-gamebased PRIVATE /W4 /permissive- /utf-8)
+    target_compile_options(chats-gamebased PRIVATE /W4 /permissive- /utf-8 /wd4996)
     set_property(TARGET chats-gamebased PROPERTY
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
