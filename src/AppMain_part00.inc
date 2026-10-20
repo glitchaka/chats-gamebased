@@ -168,11 +168,9 @@ std::filesystem::path executableDirectory() {
     return std::filesystem::path(std::wstring(buffer, buffer + count)).parent_path();
 }
 
+// Keep runtime files portable: never write stickers or received images into
+// %LOCALAPPDATA%. Anything the app must retain stays beside the executable.
 std::filesystem::path appDataDirectory() {
-    wchar_t path[MAX_PATH]{};
-    if (SUCCEEDED(SHGetFolderPathW(nullptr, CSIDL_LOCAL_APPDATA, nullptr, SHGFP_TYPE_CURRENT, path))) {
-        return std::filesystem::path(path) / L"chats-gamebased";
-    }
     return executableDirectory() / L"data";
 }
 
