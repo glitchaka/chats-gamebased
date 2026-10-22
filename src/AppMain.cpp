@@ -29,6 +29,7 @@
 
 #define importSticker importStickerLibraryOnly
 #define sendUserSticker sendUserStickerLegacy
+#define sendCurrentMessage sendCurrentMessageLegacy
 #define sendAudioToTarget sendAudioToTargetLegacy
 #define sendAudioFromPicker sendAudioFromPickerLegacy
 #define updateNetwork updateNetworkLegacy
@@ -36,6 +37,7 @@
 #undef updateNetwork
 #undef sendAudioFromPicker
 #undef sendAudioToTarget
+#undef sendCurrentMessage
 #undef sendUserSticker
 #define unreadProc unreadProcLegacy
 #define paint paintLegacy
@@ -51,9 +53,12 @@
 #undef importSticker
 
 #define sendAudioFromPicker sendAudioFromPickerWithoutRecipient
+#define sendUserSticker sendUserStickerWithoutRecipient
 #include "AppMain_attachmentfix.inc"
+#undef sendUserSticker
 #undef sendAudioFromPicker
 #include "AppMain_audiorecipientfix.inc"
+#include "AppMain_recipientfix.inc"
 #include "AppMain_minbarfix.inc"
 
 #define paint paintWithSenderIdentities
