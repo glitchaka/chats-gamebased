@@ -49,7 +49,11 @@
 #include "AppMain_stickerfix.inc"
 #undef sendUserSticker
 #undef importSticker
+
+#define sendAudioFromPicker sendAudioFromPickerWithoutRecipient
 #include "AppMain_attachmentfix.inc"
+#undef sendAudioFromPicker
+#include "AppMain_audiorecipientfix.inc"
 #include "AppMain_minbarfix.inc"
 
 #define paint paintWithSenderIdentities
