@@ -1,4 +1,6 @@
+#define defaultPlayerName defaultPlayerNameLegacy
 #include "AppMain_part00.inc"
+#undef defaultPlayerName
 
 #define drawChamferedBox drawChamferedBoxLegacy
 #define sourceGlyphIndex sourceGlyphIndexLegacy
@@ -33,7 +35,9 @@
 #undef sendAudioToTarget
 #undef sendUserSticker
 #define unreadProc unreadProcLegacy
+#define paint paintLegacy
 #include "AppMain_part03.inc"
+#undef paint
 #undef unreadProc
 #undef importSticker
 
@@ -44,6 +48,7 @@
 #undef importSticker
 #include "AppMain_attachmentfix.inc"
 #include "AppMain_minbarfix.inc"
+#include "AppMain_senderfix.inc"
 
 #define updateUnreadHud showCompactTrayBar
 #define unreadProc unreadProcFixed
