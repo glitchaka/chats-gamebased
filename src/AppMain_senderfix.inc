@@ -13,8 +13,6 @@ void paintSenderIdentities(App& app, HDC dc) {
     const Theme& t = theme(app);
     const RECT messages{24,140,610,506};
 
-    // Make the local identity visible at all times so the user knows what name
-    // peers receive in the packet header.
     const std::wstring local = utf8ToWide(app.net.localName());
     RECT identity{38,112,360,124};
     fillSolid(dc, identity, t.panel);
@@ -33,7 +31,7 @@ void paintSenderIdentities(App& app, HDC dc) {
         std::wstring sender;
         COLORREF senderColor{};
         if (line.local) {
-            if (line.kind == ChatLine::Kind::Audio && !line.channel.empty()) {
+            if (!line.channel.empty()) {
                 sender = L"TO " + line.channel;
             } else {
                 sender = L"YOU " + (local.empty() ? L"PLAYER" : local);
@@ -45,8 +43,6 @@ void paintSenderIdentities(App& app, HDC dc) {
             senderColor = RGB(71,197,157);
         }
 
-        // Clear the old compact name column and replace it with an explicit
-        // sender/recipient label. Message/sticker/audio payload rendering remains intact.
         RECT nameArea{messages.left + 14, y, messages.left + 151, y + 18};
         fillSolid(dc, nameArea, t.panel);
         drawPixelText(app, dc, fitPixelText(sender + L":", 128, 10),
