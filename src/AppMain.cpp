@@ -1,3 +1,5 @@
+#include <mmsystem.h>
+
 #define defaultPlayerName defaultPlayerNameLegacy
 #include "AppMain_part00.inc"
 #undef defaultPlayerName
@@ -48,12 +50,23 @@
 #undef importSticker
 #include "AppMain_attachmentfix.inc"
 #include "AppMain_minbarfix.inc"
+
+#define paint paintWithSenderIdentities
 #include "AppMain_senderfix.inc"
+#undef paint
+
+#include "AppMain_audioplayerfix.inc"
 
 #define updateUnreadHud showCompactTrayBar
 #define unreadProc unreadProcFixed
 #define wWinMain wWinMainLegacy
+#define ShellExecuteW internalAudioShellExecuteW
+#define updateNetwork updateNetworkWithAudioPlayer
+#define removeTrayIcon removeTrayIconWithAudioShutdown
 #include "AppMain_part04.inc"
+#undef removeTrayIcon
+#undef updateNetwork
+#undef ShellExecuteW
 #undef wWinMain
 #undef unreadProc
 #undef updateUnreadHud
