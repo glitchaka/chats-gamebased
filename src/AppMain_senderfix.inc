@@ -33,7 +33,11 @@ void paintSenderIdentities(App& app, HDC dc) {
         std::wstring sender;
         COLORREF senderColor{};
         if (line.local) {
-            sender = L"YOU " + (local.empty() ? L"PLAYER" : local);
+            if (line.kind == ChatLine::Kind::Audio && !line.channel.empty()) {
+                sender = L"TO " + line.channel;
+            } else {
+                sender = L"YOU " + (local.empty() ? L"PLAYER" : local);
+            }
             senderColor = t.accentBright;
         } else {
             const std::wstring remote = line.name.empty() ? L"UNKNOWN" : line.name;
@@ -42,7 +46,7 @@ void paintSenderIdentities(App& app, HDC dc) {
         }
 
         // Clear the old compact name column and replace it with an explicit
-        // sender label. Message/sticker/audio payload rendering remains intact.
+        // sender/recipient label. Message/sticker/audio payload rendering remains intact.
         RECT nameArea{messages.left + 14, y, messages.left + 151, y + 18};
         fillSolid(dc, nameArea, t.panel);
         drawPixelText(app, dc, fitPixelText(sender + L":", 128, 10),
