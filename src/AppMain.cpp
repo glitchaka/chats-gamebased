@@ -1,8 +1,8 @@
-#include <mmsystem.h>
-
 #define defaultPlayerName defaultPlayerNameLegacy
 #include "AppMain_part00.inc"
 #undef defaultPlayerName
+
+#include <mmsystem.h>
 
 #define drawChamferedBox drawChamferedBoxLegacy
 #define sourceGlyphIndex sourceGlyphIndexLegacy
