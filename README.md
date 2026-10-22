@@ -71,3 +71,11 @@ El ejecutable queda en:
 ```text
 build\bin\Release\chats-gamebased.exe
 ```
+
+## Code signing policy
+
+El proyecto está preparando su incorporación al programa gratuito de firma para software Open Source de SignPath Foundation.
+
+**Free code signing provided by SignPath.io, certificate by SignPath Foundation.**
+
+La política completa de firma, roles y restricciones de releases está en [SIGNING_POLICY.md](SIGNING_POLICY.md). El comportamiento de red y privacidad está documentado en [PRIVACY.md](PRIVACY.md).
